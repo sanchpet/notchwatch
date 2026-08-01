@@ -608,7 +608,11 @@ struct NotchContentView: View {
             Circle()
                 .fill(activityGlowColor)
                 .frame(width: 8, height: 8)
-            Text("Claude Code")
+            // The product's own name, from the bundle — the literal here read
+            // "Claude Code", which is the thing being watched, not the thing
+            // doing the watching, and it sat directly above a notice saying
+            // "Your turn".
+            Text(AppIdentity.displayName)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.white)
 
