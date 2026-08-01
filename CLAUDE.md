@@ -118,7 +118,7 @@ Path `/Users/foo/project` becomes `-Users-foo-project` (replace `/` with `-`)
   tool call resolving it
 - **Tool running**: Active tools in `state.activeTools`
 - **Session done**: `lastStopReason == "end_turn"` with nothing thinking and no
-  active tool (`ClaudeCodeState.isDone`), or interrupted text
+  active tool (`ClaudeCodeState.isSessionComplete`), or interrupted text
 - **Permission needed**: tool running ≥ `permissionCheckDelay` (5s) without a result
 - **Idle timeout**: no new tool for `toolIdleDelay` (10s)
 

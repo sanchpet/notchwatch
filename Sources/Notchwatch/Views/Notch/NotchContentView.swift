@@ -17,6 +17,11 @@ struct NotchContentView: View {
     private let startupBrightColor = Color(red: 0.75, green: 0.9, blue: 1.0)
     private let activityGlowColor = Color(red: 0.9, green: 0.4, blue: 0.1)
     private let activityBrightColor = Color(red: 1.0, green: 0.55, blue: 0.2)
+    // Green rather than another shade of the activity orange: "your move" is a
+    // different kind of event from "busy", and a hue apart is legible from the
+    // corner of an eye where a brightness apart is not.
+    private let awaitingGlowColor = Color(red: 0.2, green: 0.75, blue: 0.45)
+    private let awaitingBrightColor = Color(red: 0.4, green: 0.95, blue: 0.6)
 
     private var isExpanded: Bool {
         notchVM.notchState == .open || notchVM.notchState == .peeking
@@ -79,6 +84,17 @@ struct NotchContentView: View {
                             bottomCornerRadius: bottomCornerRadius,
                             glowColor: activityGlowColor,
                             brightColor: activityBrightColor
+                        )
+                    } else if !claudeCodeManager.sessionsAwaitingUser.isEmpty, notchVM.notchState == .closed {
+                        // Deliberately persistent, not a flash: a signal that
+                        // has to be caught in the second it fires is a signal
+                        // that will be missed. It clears when the session picks
+                        // work back up, which is the moment it stops being true.
+                        NotchGlowBorder(
+                            topCornerRadius: topCornerRadius,
+                            bottomCornerRadius: bottomCornerRadius,
+                            glowColor: awaitingGlowColor,
+                            brightColor: awaitingBrightColor
                         )
                     }
                 }

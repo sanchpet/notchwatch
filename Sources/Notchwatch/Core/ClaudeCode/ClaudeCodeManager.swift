@@ -96,6 +96,17 @@ final class ClaudeCodeManager: ObservableObject {
     /// Sessions currently waiting for user permission approval
     @Published private(set) var sessionsNeedingPermission: [ClaudeSession] = []
 
+    /// Sessions that have finished a turn and are waiting on the user.
+    ///
+    /// The state was already computed per session and thrown away: nothing
+    /// consumed `isSessionComplete`, so the notch fell silent at the exact
+    /// moment it had something to say. "The agent stopped and it is your move"
+    /// is the one event worth interrupting for — everything else can be
+    /// discovered by looking, this one has to find you.
+    var sessionsAwaitingUser: [ClaudeSession] {
+        availableSessions.filter { sessionStates[$0.id]?.isSessionComplete == true }
+    }
+
     /// Progress of the workflow the focused session is running, when it is
     /// running one. Refreshed on the session scan rather than on transcript
     /// writes: a workflow's own transcript stays silent for the length of the
@@ -830,17 +841,28 @@ final class ClaudeCodeManager: ObservableObject {
         sessionKey: String,
         at entryDate: Date
     ) {
-        if let stopReason = message["stop_reason"] as? String {
-            sessionState.lastStopReason = stopReason
-            if stopReason == "end_turn" {
-                sessionState.isThinking = false
-            }
-        }
-
+        // Order matters here, and used to be wrong in a way that cost the app its
+        // most valuable state. `stop_reason` was read first and the role checked
+        // second — but the assistant message carrying `end_turn` *is* an
+        // assistant message, so the role branch immediately set thinking back to
+        // true and cleared the reason it had just recorded. `isSessionComplete`
+        // could therefore never be true from a transcript, and the notch went
+        // quiet at the exact moment the turn ended and the user's attention was
+        // wanted.
         let role = message["role"] as? String
-        if role == "user" || role == "assistant" {
+        let stopReason = message["stop_reason"] as? String
+
+        if role == "user" {
+            // A new prompt opens a turn: whatever ended the last one is spent.
             sessionState.isThinking = true
             sessionState.lastStopReason = nil
+        } else if role == "assistant" {
+            sessionState.lastStopReason = stopReason
+            // `tool_use` means the turn continues through a tool; only
+            // `end_turn` hands control back.
+            sessionState.isThinking = stopReason != "end_turn"
+        } else if let stopReason {
+            sessionState.lastStopReason = stopReason
         }
 
         guard let content = message["content"] as? [[String: Any]] else { return }
