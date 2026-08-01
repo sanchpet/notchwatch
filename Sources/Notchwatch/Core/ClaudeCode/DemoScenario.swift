@@ -114,11 +114,26 @@ enum DemoScenario {
         ),
     ]
 
-    static func make(now: Date = Date()) -> Fixture {
+    /// Which picture of the world the fixture paints.
+    enum Variant {
+        /// Something is running: the tray reports the tool and its clock.
+        case busy
+        /// Every session has handed back. The tray falls to the session count
+        /// and the waiting outline is the whole of the signal — the state the
+        /// notch is watched for, and the one hardest to catch on a real desktop
+        /// because it ends the moment you answer it.
+        case quiet
+        /// Sessions open but between turns: nothing running, nothing owed. The
+        /// tray falls to the session count and no border lights at all — the
+        /// baseline the other two are read against.
+        case idle
+    }
+
+    static func make(_ variant: Variant = .busy, now: Date = Date()) -> Fixture {
         var sessions: [ClaudeSession] = []
         var states: [String: ClaudeCodeState] = [:]
 
-        for spec in specs {
+        for spec in specs.map({ adjust($0, for: variant) }) {
             let workspace = "/Users/demo/code/\(spec.project)"
             let session = ClaudeSession(
                 pid: 0,
@@ -135,6 +150,26 @@ enum DemoScenario {
             sessions: sessions,
             states: states,
             workflow: WorkflowProgress(runID: "wf_demo", started: 13, finished: 8)
+        )
+    }
+
+    /// The same session, moved into the state `variant` describes.
+    private static func adjust(_ spec: SessionSpec, for variant: Variant) -> SessionSpec {
+        guard variant != .busy else { return spec }
+        return SessionSpec(
+            project: spec.project,
+            id: spec.id,
+            branch: spec.branch,
+            promptTokens: spec.promptTokens,
+            longWindow: spec.longWindow,
+            updatedSecondsAgo: spec.updatedSecondsAgo,
+            isThinking: false,
+            // `end_turn` is what makes a session count as waiting on the user;
+            // without it the same sessions are merely open.
+            stopReason: variant == .quiet ? "end_turn" : nil,
+            activeTool: nil,
+            recentTools: spec.recentTools,
+            summary: spec.summary
         )
     }
 

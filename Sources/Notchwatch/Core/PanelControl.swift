@@ -36,6 +36,10 @@ enum PanelControl {
         /// Fabricated sessions, so that documentation never photographs real
         /// work. See `DemoScenario`.
         case demoOn = "demo-on"
+        /// The fixture with nothing running — every session waiting on the user.
+        case demoQuiet = "demo-quiet"
+        /// The fixture with sessions open but between turns.
+        case demoIdle = "demo-idle"
         case demoOff = "demo-off"
     }
 

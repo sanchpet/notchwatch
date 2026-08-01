@@ -115,7 +115,43 @@ final class ClaudeCodeManager: ObservableObject {
     /// is the one event worth interrupting for — everything else can be
     /// discovered by looking, this one has to find you.
     var sessionsAwaitingUser: [ClaudeSession] {
-        availableSessions.filter { sessionStates[$0.id]?.isSessionComplete == true }
+        availableSessions.filter {
+            sessionStates[$0.id]?.isSessionComplete == true && !acknowledgedAwaiting.contains($0.id)
+        }
+    }
+
+    /// Sessions whose hand-back the user has already seen.
+    ///
+    /// Without this the signal never goes out: a finished session stays finished
+    /// until it is answered, so with several open at least one is usually done
+    /// and the waiting border burns permanently — at which point it means
+    /// nothing, and the activity glow it outranks never shows at all. The border
+    /// says "someone finished since you last looked", and looking is what clears
+    /// it. A session that goes back to work leaves the set, so its next hand-back
+    /// lights the border again.
+    private var acknowledgedAwaiting: Set<String> = []
+
+    /// Called when the panel is opened: everything waiting has now been seen.
+    func acknowledgeAwaitingSessions() {
+        let waiting = availableSessions
+            .filter { sessionStates[$0.id]?.isSessionComplete == true }
+            .map(\.id)
+        guard !waiting.isEmpty else { return }
+        acknowledgedAwaiting.formUnion(waiting)
+        objectWillChange.send()
+    }
+
+    /// Drop acknowledgements for sessions that are no longer finished, so the
+    /// next time they finish the border lights again.
+    private func rearmAcknowledgements() {
+        let stillDone = Set(
+            availableSessions
+                .filter { sessionStates[$0.id]?.isSessionComplete == true }
+                .map(\.id)
+        )
+        guard !acknowledgedAwaiting.isSubset(of: stillDone) else { return }
+        acknowledgedAwaiting.formIntersection(stillDone)
+        objectWillChange.send()
     }
 
     /// Progress of the workflow the focused session is running, when it is
@@ -333,8 +369,7 @@ final class ClaudeCodeManager: ObservableObject {
     /// Watching stops rather than being ignored: leaving the timers running
     /// would have a real scan overwrite the fixture between a command and a
     /// screenshot, which is the sort of flake that wastes an afternoon.
-    func enterDemoMode() {
-        guard !isDemoMode else { return }
+    func enterDemoMode(_ variant: DemoScenario.Variant = .busy) {
         isDemoMode = true
 
         sessionScanTimer?.invalidate()
@@ -343,7 +378,8 @@ final class ClaudeCodeManager: ObservableObject {
             detach(sessionKey: key)
         }
 
-        let fixture = DemoScenario.make()
+        acknowledgedAwaiting.removeAll()
+        let fixture = DemoScenario.make(variant)
         availableSessions = fixture.sessions
         sessionStates = fixture.states
         workflowProgress = fixture.workflow
@@ -489,6 +525,7 @@ final class ClaudeCodeManager: ObservableObject {
         }
 
         refreshWorkflowProgress()
+        rearmAcknowledgements()
     }
 
     /// Progress of the focused session's workflow run, if any.

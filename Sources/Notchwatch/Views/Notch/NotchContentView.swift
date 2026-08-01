@@ -130,6 +130,11 @@ struct NotchContentView: View {
                     }
                 }
                 .onChange(of: notchVM.notchState) { _, newState in
+                    // Opening the panel is the act of looking, which is what the
+                    // waiting border was asking for.
+                    if newState == .open {
+                        claudeCodeManager.acknowledgeAwaitingSessions()
+                    }
                     // The notice belongs to the peek. When the peek is over —
                     // by timeout or because the user opened the panel — it goes.
                     if newState != .peeking {
@@ -168,7 +173,9 @@ struct NotchContentView: View {
                 case .close: notchVM.close()
                 case .toggle: notchVM.toggle()
                 case .peek: notchVM.peek(duration: settings.noticeDurationSeconds)
-                case .demoOn: claudeCodeManager.enterDemoMode()
+                case .demoOn: claudeCodeManager.enterDemoMode(.busy)
+                case .demoQuiet: claudeCodeManager.enterDemoMode(.quiet)
+                case .demoIdle: claudeCodeManager.enterDemoMode(.idle)
                 case .demoOff: claudeCodeManager.exitDemoMode()
                 }
             }

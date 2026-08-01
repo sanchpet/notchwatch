@@ -6,7 +6,15 @@ Notchwatch is a menu-bar/notch companion for [Claude Code](https://claude.com/cl
 
 ![The expanded panel: current tool with a clock, workflow progress, and one row per live session with its own context bar](docs/panel.png)
 
-The screenshot is the demo fixture rather than a real desktop — see [Screenshots](#screenshots). Closed, all of this collapses to a single capsule under the cut-out saying what is running; the outline turns green and stays green when a session finishes and the turn is yours.
+Closed — which is how it spends almost all of its time — the panel collapses to one capsule under the cut-out, and the outline carries the state:
+
+| | |
+|---|---|
+| ![A tool running: the notch traced in orange, the tray reading Bash](docs/tray-working.png) | **Working.** The tray names the running tool; the border sweeps orange while anything is under way. |
+| ![Waiting: the notch and tray outlined in steady green, the tray reading Done](docs/tray-your-turn.png) | **Your turn.** A session handed control back. The green is steady rather than sweeping, and holds until you look — opening the panel is what clears it. |
+| ![Idle: no glow, the tray reading 4 sessions](docs/tray-idle.png) | **Idle.** Sessions open, nothing owed in either direction. No border at all. |
+
+All screenshots are the demo fixture rather than a real desktop — see [Screenshots](#screenshots).
 
 It watches local files only. It is not a client for anything, it holds no credentials, and it makes no network requests — there is no `URLSession`, no `Network` import and no socket anywhere in `Sources/`, and the app ships with an empty entitlements file.
 
