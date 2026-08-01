@@ -23,13 +23,24 @@ struct SessionListView: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            ForEach(manager.availableSessions) { session in
-                if let state = manager.sessionStates[session.id] {
-                    SessionRow(state: state, limit: settings.effectiveContextLimit(for: state))
-                        .onTapGesture {
-                            manager.focusIDE(for: session)
-                        }
+            // Busy first, then whichever spoke most recently — the same order the
+            // focus itself uses, so the top row is the one the pinned readouts
+            // would have described.
+            let rows = manager.availableSessions.compactMap { session -> (ClaudeSession, ClaudeCodeState)? in
+                manager.sessionStates[session.id].map { (session, $0) }
+            }
+            .sorted { lhs, rhs in
+                if lhs.1.isActive != rhs.1.isActive {
+                    return lhs.1.isActive
                 }
+                return (lhs.1.lastUpdateTime ?? .distantPast) > (rhs.1.lastUpdateTime ?? .distantPast)
+            }
+
+            ForEach(rows, id: \.0.id) { session, state in
+                SessionRow(state: state, limit: settings.effectiveContextLimit(for: state))
+                    .onTapGesture {
+                        manager.focusIDE(for: session)
+                    }
             }
         }
     }
@@ -45,6 +56,31 @@ private struct SessionRow: View {
     private var projectName: String {
         let name = (state.cwd as NSString).lastPathComponent
         return name.isEmpty ? "unknown" : name
+    }
+
+    /// Head of the session id. Several sessions of one project on one branch are
+    /// otherwise indistinguishable — three rows reading `hypomnemata main` tell
+    /// you there are three and nothing else. This is the same id Claude Code
+    /// names its transcript files by, so it is the handle that leads somewhere.
+    private var shortID: String {
+        String(state.sessionId.prefix(6))
+    }
+
+    /// How long since this session last did anything. The bar answers how full
+    /// it is; this answers whether anyone is home.
+    private var idleFor: String? {
+        guard let last = state.lastUpdateTime else { return nil }
+        let seconds = Int(Date().timeIntervalSince(last))
+        if seconds < 10 {
+            return nil
+        }
+        if seconds < 60 {
+            return "\(seconds)s"
+        }
+        if seconds < 3600 {
+            return "\(seconds / 60)m"
+        }
+        return "\(seconds / 3600)h"
     }
 
     private var fraction: Double {
@@ -95,7 +131,19 @@ private struct SessionRow: View {
                         .truncationMode(.middle)
                 }
 
+                if !shortID.isEmpty {
+                    Text(shortID)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.35))
+                }
+
                 Spacer(minLength: 4)
+
+                if let idleFor {
+                    Text(idleFor)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.4))
+                }
 
                 Text("\(formatTokens(state.tokenUsage.promptTokens)) / \(formatTokens(limit))")
                     .font(.system(size: 9, design: .monospaced))

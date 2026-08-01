@@ -378,53 +378,15 @@ struct NotchContentView: View {
 
     private var expandedContent: some View {
         VStack(spacing: 6) {
-            // Show todo list if enabled and has items
-            if settings.showTodoList, !claudeCodeManager.state.todos.isEmpty {
-                NotchSection(title: "Current Tasks") {
-                    TodoListView(todos: claudeCodeManager.state.todos, maxItems: 4)
-                }
-            }
-
-            let claudeTools = claudeCodeManager.state.activeTools + claudeCodeManager.state.recentTools
-
-            // Always first, whatever the tool-display mode: it is the only line
-            // that answers "is it alive" rather than "what has it done".
-            CurrentActivityView(
-                activeTool: claudeCodeManager.state.activeTools.first,
-                lastTool: claudeCodeManager.state.recentTools.first,
-                isThinking: claudeCodeManager.state.isThinking,
-                model: extractModelName(claudeCodeManager.state.model) ?? "",
-                settings: settings,
-                powerMonitor: PowerStateMonitor.shared
-            )
-
-            // A fan-out of subagents is the one case where the session looks
-            // idle for an hour while a great deal happens. Its own journal is
-            // the only place that says how far along it is.
-            if let workflow = claudeCodeManager.workflowProgress {
-                WorkflowProgressRow(progress: workflow)
-            }
-
-            if settings.toolDisplayMode == "singular" {
-                // Singular mode: show one detailed event
-                if let currentTool = claudeTools.first {
-                    NotchSection(title: currentTool.isRunning ? "Active Tool" : "Last Tool") {
-                        SingularToolDetailView(tool: currentTool, tokenUsage: claudeCodeManager.state.tokenUsage)
-                    }
-                }
-            } else if settings.toolDisplayMode == "list" {
-                // List mode: show recent events list
-                NotchSection(title: "Recent Tools") {
-                    ClaudeToolListView(tools: claudeTools, maxItems: 4)
-                }
-            }
-
-            // One row per session, so that "which session is this?" has an answer.
-            // Only worth the room when there is something to tell apart: with a
-            // single session the footer and the bar below already describe it.
-            if claudeCodeManager.availableSessions.count > 1 {
-                NotchSection(title: "Sessions") {
-                    SessionListView(manager: claudeCodeManager, settings: settings)
+            // The rows above the footer vary with the session count, the display
+            // mode and whether a workflow is running, while the panel's height
+            // does not: a fixed frame met by taller content clips it, and what
+            // it clipped was the top row, under the header. Scrolling is the
+            // honest resolution — the footer stays pinned because it is the part
+            // that must never move.
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 6) {
+                    scrollingContent
                 }
             }
 
@@ -438,33 +400,104 @@ struct NotchContentView: View {
                     }
             }
 
-            // Context progress bar (with integrated API usage badges).
-            //
-            // Suppressed once the Sessions list is up: that list gives every
-            // session its own bar, and an unlabelled bar beneath them would be a
-            // fifth reading whose subject the panel never names — the ambiguity
-            // the list exists to remove.
-            if settings.showContextProgress, claudeCodeManager.availableSessions.count <= 1 {
-                ContextProgressBar(
-                    tokenUsage: claudeCodeManager.state.tokenUsage,
-                    contextLimit: settings.effectiveContextLimit(for: claudeCodeManager.state)
-                )
-            }
-
-            let claudeTokens = claudeCodeManager.state.tokenUsage
-
-            NotchFooterView(
-                sessionDuration: Date().timeIntervalSince(sessionStart),
-                tokenTotal: claudeTokens.inputTokens + claudeTokens.outputTokens,
-                cacheReadTokens: claudeTokens.cacheReadInputTokens,
-                cacheWriteTokens: claudeTokens.cacheCreationInputTokens,
-                showTokenCount: settings.showNotchTokenCount,
-                gitBranch: claudeCodeManager.state.gitBranch
-            )
+            footerBlock
         }
         .padding(.horizontal, 14)
-        .padding(.top, 6)
-        .padding(.bottom, 8)
+        .padding(.bottom, 12)
+    }
+
+    @ViewBuilder
+    private var scrollingContent: some View {
+        if settings.showTodoList, !claudeCodeManager.state.todos.isEmpty {
+            NotchSection(title: "Current Tasks") {
+                TodoListView(todos: claudeCodeManager.state.todos, maxItems: 4)
+            }
+        }
+
+        let claudeTools = claudeCodeManager.state.activeTools + claudeCodeManager.state.recentTools
+
+        // Always first, whatever the tool-display mode: it is the only line
+        // that answers "is it alive" rather than "what has it done".
+        CurrentActivityView(
+            activeTool: claudeCodeManager.state.activeTools.first,
+            lastTool: claudeCodeManager.state.recentTools.first,
+            isThinking: claudeCodeManager.state.isThinking,
+            model: extractModelName(claudeCodeManager.state.model) ?? "",
+            settings: settings,
+            powerMonitor: PowerStateMonitor.shared
+        )
+
+        // A fan-out of subagents is the one case where the session looks
+        // idle for an hour while a great deal happens. Its own journal is
+        // the only place that says how far along it is.
+        if let workflow = claudeCodeManager.workflowProgress {
+            WorkflowProgressRow(progress: workflow)
+        }
+
+        if settings.toolDisplayMode == "singular" {
+            // Singular mode: show one detailed event
+            if let currentTool = claudeTools.first {
+                NotchSection(title: currentTool.isRunning ? "Active Tool" : "Last Tool") {
+                    SingularToolDetailView(tool: currentTool, tokenUsage: claudeCodeManager.state.tokenUsage)
+                }
+            }
+        } else if settings.toolDisplayMode == "list" {
+            // List mode: show recent events list
+            NotchSection(title: "Recent Tools") {
+                ClaudeToolListView(tools: claudeTools, maxItems: 4)
+            }
+        }
+
+        // One row per session, so that "which session is this?" has an answer.
+        // Only worth the room when there is something to tell apart: with a
+        // single session the footer and the bar below already describe it.
+        if claudeCodeManager.availableSessions.count > 1 {
+            NotchSection(title: "Sessions") {
+                SessionListView(manager: claudeCodeManager, settings: settings)
+            }
+        }
+    }
+
+    /// Context bar and footer: the readouts pinned below the scrolling rows.
+    ///
+    /// Both describe the *focused* session, which is only unambiguous while
+    /// there is one. With several live, the Sessions list carries branch and
+    /// context per row, so repeating either here would be a reading whose
+    /// subject the panel never names — and the tokens become a sum across
+    /// sessions, which is a figure that means the same thing however many there
+    /// are.
+    @ViewBuilder
+    private var footerBlock: some View {
+        let single = claudeCodeManager.availableSessions.count <= 1
+
+        if settings.showContextProgress, single {
+            ContextProgressBar(
+                tokenUsage: claudeCodeManager.state.tokenUsage,
+                contextLimit: settings.effectiveContextLimit(for: claudeCodeManager.state)
+            )
+        }
+
+        let tokens = single
+            ? claudeCodeManager.state.tokenUsage
+            : claudeCodeManager.sessionStates.values.reduce(into: ClaudeTokenUsage()) { sum, state in
+                sum.inputTokens += state.tokenUsage.inputTokens
+                sum.outputTokens += state.tokenUsage.outputTokens
+                sum.cacheReadInputTokens += state.tokenUsage.cacheReadInputTokens
+                sum.cacheCreationInputTokens += state.tokenUsage.cacheCreationInputTokens
+            }
+
+        NotchFooterView(
+            // Time since the focused session last did anything, not the panel's
+            // own age: the clock used to start when the view appeared, so it
+            // measured how long Notchwatch had been open while sitting beside a
+            // branch badge that made it read as the session's.
+            sessionDuration: claudeCodeManager.state.lastUpdateTime.map { Date().timeIntervalSince($0) } ?? 0,
+            tokenTotal: tokens.inputTokens + tokens.outputTokens,
+            cacheReadTokens: tokens.cacheReadInputTokens,
+            cacheWriteTokens: tokens.cacheCreationInputTokens,
+            showTokenCount: settings.showNotchTokenCount,
+            gitBranch: single ? claudeCodeManager.state.gitBranch : nil
+        )
     }
 
     private var peekHeader: some View {
