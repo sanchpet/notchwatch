@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template for the bundle's Info.plist. scripts/build-app.sh substitutes the
+  ${...} placeholders; nothing else may write this file. Do not reintroduce
+  Xcode's $(BUILD_SETTING) syntax — SwiftPM does not expand it and the literals
+  end up in the shipped bundle.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>${PRODUCT_NAME}</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>${BUNDLE_ID}</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>${PRODUCT_NAME}</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>${VERSION}</string>
+	<key>CFBundleVersion</key>
+	<string>${BUILD}</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>${MIN_MACOS}</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>${COPYRIGHT}</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+</dict>
+</plist>

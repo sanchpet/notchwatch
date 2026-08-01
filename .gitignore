@@ -1,19 +1,38 @@
-# Xcode
-*.xcodeproj/*
-!*.xcodeproj/project.pbxproj
-!*.xcodeproj/xcshareddata/
+# SwiftPM
+.build/
+.swiftpm/
+Packages/
+*.xcodeproj/
+*.xcworkspace/
+
+# Xcode leftovers (Package.swift can still be opened in Xcode)
+DerivedData/
+xcuserdata/
 *.xcuserstate
 *.xcscmblueprint
 *.xccheckout
-xcuserdata/
 
-# Build products
+# Build and release artifacts
 build/
-DerivedData/
+dist/
 *.app
-*.ipa
-*.dSYM.zip
+*.dmg
 *.dSYM
+*.dSYM.zip
+
+# Signing material — never commit
+*.p12
+*.pem
+*.cer
+*.mobileprovision
+*.provisionprofile
+
+# Local configuration
+.env
+.env.*
+mise.local.toml
+.mise.local.toml
+.claude/settings.local.json
 
 # macOS
 .DS_Store
@@ -21,8 +40,8 @@ DerivedData/
 .LSOverride
 ._*
 
-# IDE
-*.idea/
+# Editors
+.idea/
 *.swp
 *.swo
 *~
