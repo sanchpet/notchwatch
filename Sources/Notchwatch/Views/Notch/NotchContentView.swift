@@ -21,6 +21,7 @@ struct NotchContentView: View {
 
     @State private var peekNotice: PeekNotice?
     @State private var permissionToolName: String?
+    @State private var panelControlObserver: NSObjectProtocol?
     @State private var turnDoneProject: String?
     @State private var turnDoneSummary: String?
 
@@ -161,9 +162,20 @@ struct NotchContentView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             triggerStartupGlow()
+            panelControlObserver = PanelControl.observe { command in
+                switch command {
+                case .open: notchVM.open()
+                case .close: notchVM.close()
+                case .toggle: notchVM.toggle()
+                case .peek: notchVM.peek(duration: settings.noticeDurationSeconds)
+                }
+            }
         }
         .onDisappear {
             startupGlowTask?.cancel()
+            if let panelControlObserver {
+                DistributedNotificationCenter.default().removeObserver(panelControlObserver)
+            }
         }
     }
 

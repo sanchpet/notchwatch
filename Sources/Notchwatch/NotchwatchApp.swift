@@ -20,6 +20,11 @@ enum NotchwatchMain {
         if HookRelay.isRelayInvocation(CommandLine.arguments) {
             HookRelay.run()
         }
+        // Same reasoning as the relay: a control invocation talks to whatever
+        // instance is already running and must never become a second one.
+        if PanelControl.isControlInvocation(CommandLine.arguments) {
+            PanelControl.run(CommandLine.arguments)
+        }
         NotchwatchApp.main()
     }
 }
