@@ -372,8 +372,21 @@ final class ClaudeCodeManager: ObservableObject {
     func enterDemoMode(_ variant: DemoScenario.Variant = .busy) {
         isDemoMode = true
 
+        // Every clock, not just the scan. The idle timers fire three and ten
+        // seconds after the last activity and rewrite whatever state they find —
+        // so a fixture installed for a screenshot was quietly flattened to
+        // "idle" a few seconds later, and the capture caught the wreckage rather
+        // than the picture. Stopping one clock and leaving three is not stopping
+        // the clocks.
         sessionScanTimer?.invalidate()
         sessionScanTimer = nil
+        idleCheckTimer?.invalidate()
+        idleCheckTimer = nil
+        toolIdleTimer?.invalidate()
+        toolIdleTimer = nil
+        permissionCheckTimer?.invalidate()
+        permissionCheckTimer = nil
+
         for key in Array(watched.keys) {
             detach(sessionKey: key)
         }

@@ -4,7 +4,7 @@ Claude Code session state in the notch of your Mac.
 
 Notchwatch is a menu-bar/notch companion for [Claude Code](https://claude.com/claude-code). It sits in the notch (or the menu bar on Macs without one) and shows what the agent is doing right now: the tool it is running, whether it is thinking, whether it is waiting for a permission decision, the current todo list, elapsed time, git branch, token usage and how much of the context window is left.
 
-![The expanded panel: current tool with a clock, workflow progress, and one row per live session with its own context bar](docs/panel.png)
+![The expanded panel: current tool with a clock, workflow progress, and one row per live session — the ones waiting on you badged and sorted to the top](docs/panel.png)
 
 Closed — which is how it spends almost all of its time — the panel collapses to one capsule under the cut-out, and the outline carries the state:
 
