@@ -142,20 +142,53 @@ final class ClaudeCodeManager: ObservableObject {
 
     // MARK: - Private Properties
 
-    private let claudeDir: URL = {
+    /// Home directory, read from the password database rather than `NSHomeDirectory`
+    /// so that a future sandboxed build still finds the real one.
+    private static let homeDir: URL = {
         if let pw = getpwuid(getuid()), let home = pw.pointee.pw_dir {
-            let homePath = String(cString: home)
-            return URL(fileURLWithPath: homePath).appendingPathComponent(".claude")
+            return URL(fileURLWithPath: String(cString: home))
         }
-        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
+        return FileManager.default.homeDirectoryForCurrentUser
     }()
 
-    private var ideDir: URL {
-        claudeDir.appendingPathComponent("ide")
+    /// Every Claude Code configuration root on this machine, not just `~/.claude`.
+    ///
+    /// `CLAUDE_CONFIG_DIR` relocates the whole configuration directory, and running
+    /// separate accounts out of `~/.claude-personal` and `~/.claude-work` is the
+    /// documented way to keep them apart. A watcher that reads only `~/.claude`
+    /// therefore misses every session of anyone who uses that mechanism — and
+    /// silently, since the default root still exists and still holds whatever
+    /// stale transcripts were written before the split.
+    ///
+    /// The app is launched from Finder and inherits no shell environment, so the
+    /// variable itself is not available to read: the roots are discovered instead,
+    /// by looking for the `projects` directory that makes a root a root.
+    private let claudeRoots: [URL] = {
+        let fm = FileManager.default
+        // Deliberately without `.skipsHiddenFiles`: every root is a dot-directory,
+        // so that option would hide exactly what is being looked for.
+        let candidates = (try? fm.contentsOfDirectory(
+            at: homeDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsSubdirectoryDescendants]
+        )) ?? []
+
+        let roots = ([homeDir.appendingPathComponent(".claude")] + candidates.sorted { $0.path < $1.path })
+            .filter { $0.lastPathComponent == ".claude" || $0.lastPathComponent.hasPrefix(".claude-") }
+            .filter { fm.fileExists(atPath: $0.appendingPathComponent("projects").path) }
+
+        // The seed above keeps the default root first when it exists; the dedup
+        // drops the copy the directory listing then yields.
+        var seen = Set<String>()
+        return roots.filter { seen.insert($0.standardizedFileURL.path).inserted }
+    }()
+
+    private var ideDirs: [URL] {
+        claudeRoots.map { $0.appendingPathComponent("ide") }
     }
 
-    private var projectsDir: URL {
-        claudeDir.appendingPathComponent("projects")
+    private var projectsDirs: [URL] {
+        claudeRoots.map { $0.appendingPathComponent("projects") }
     }
 
     /// One watched transcript, with everything needed to keep reading it.
@@ -216,7 +249,7 @@ final class ClaudeCodeManager: ObservableObject {
     // MARK: - Initialization
 
     private init() {
-        debugLog("[ClaudeCode] ClaudeCodeManager initializing (claude dir: \(claudeDir.path))")
+        debugLog("[ClaudeCode] ClaudeCodeManager initializing (roots: \(claudeRoots.map(\.lastPathComponent)))")
         startSessionScanning()
         loadDailyStats()
         updateHookBridge()
@@ -282,8 +315,9 @@ final class ClaudeCodeManager: ObservableObject {
         var sessions: [ClaudeSession] = []
 
         // IDE lock files, written by the editor extensions.
-        if fm.fileExists(atPath: ideDir.path),
-           let lockFiles = try? fm.contentsOfDirectory(at: ideDir, includingPropertiesForKeys: nil) {
+        for ideDir in ideDirs {
+            guard fm.fileExists(atPath: ideDir.path),
+                  let lockFiles = try? fm.contentsOfDirectory(at: ideDir, includingPropertiesForKeys: nil) else { continue }
             for lockFile in lockFiles where lockFile.pathExtension == "lock" {
                 guard let data = fm.contents(atPath: lockFile.path),
                       let session = try? JSONDecoder().decode(ClaudeSession.self, from: data),
@@ -294,8 +328,9 @@ final class ClaudeCodeManager: ObservableObject {
 
         // Terminal sessions leave no lock file; a recently written transcript is
         // the only trace they have.
-        if fm.fileExists(atPath: projectsDir.path),
-           let projectDirs = try? fm.contentsOfDirectory(at: projectsDir, includingPropertiesForKeys: nil) {
+        for projectsDir in projectsDirs {
+            guard fm.fileExists(atPath: projectsDir.path),
+                  let projectDirs = try? fm.contentsOfDirectory(at: projectsDir, includingPropertiesForKeys: nil) else { continue }
             let recentThreshold = Date().addingTimeInterval(-300) // 5 minutes
 
             for projectDir in projectDirs {
@@ -393,7 +428,19 @@ final class ClaudeCodeManager: ObservableObject {
         attach(session, transcript: transcript)
     }
 
+    /// The transcript a discovered session reads from, searched across every
+    /// configuration root: a lock written by an editor running one profile says
+    /// nothing about which profile the session it describes belongs to.
     private func locateTranscript(for session: ClaudeSession) -> URL? {
+        for projectsDir in projectsDirs {
+            if let file = locateTranscript(for: session, under: projectsDir) {
+                return file
+            }
+        }
+        return nil
+    }
+
+    private func locateTranscript(for session: ClaudeSession, under projectsDir: URL) -> URL? {
         let fm = FileManager.default
 
         if let projectKey = session.projectKey {
@@ -1072,10 +1119,13 @@ final class ClaudeCodeManager: ObservableObject {
     // MARK: - Daily Stats
 
     func loadDailyStats() {
-        let statsFile = claudeDir.appendingPathComponent("stats-cache.json")
-
-        guard FileManager.default.fileExists(atPath: statsFile.path),
-              let data = FileManager.default.contents(atPath: statsFile.path) else {
+        // First root that has a cache wins. The file is per-account, and totals
+        // from two accounts are not a total of anything — showing one profile's
+        // figures beats inventing a sum nobody's usage page would agree with.
+        guard let statsFile = claudeRoots
+            .map({ $0.appendingPathComponent("stats-cache.json") })
+            .first(where: { FileManager.default.fileExists(atPath: $0.path) }),
+            let data = FileManager.default.contents(atPath: statsFile.path) else {
             return
         }
 
