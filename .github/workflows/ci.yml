@@ -1,0 +1,78 @@
+name: CI
+
+# Third-party actions are pinned by full commit SHA (supply-chain safety); the
+# trailing comment records the human-readable tag.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Supersede stale runs on a branch, but never cancel main.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        with:
+          install: true
+          cache: true
+
+      - name: Lint
+        run: mise run lint
+
+      # The release pipeline is shell, and shellcheck only ever ran on the
+      # contributor's machine — a warning in scripts/ could reach a tag with CI
+      # green. Same for gitleaks. Running the hook set here makes the commit hook
+      # and CI enforce one policy over one set of files, not two.
+      - name: Repository checks (shellcheck, gitleaks, YAML/JSON)
+        run: mise run lint:repo
+
+  build:
+    name: Build
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        with:
+          install: true
+          cache: true
+
+      # xcbeautify's github-actions renderer turns compiler diagnostics into
+      # inline annotations. pipefail keeps the compiler's exit code authoritative.
+      - name: Build (release)
+        run: |
+          set -o pipefail
+          mise run build:release 2>&1 | xcbeautify --renderer github-actions --preserve-unbeautified
+
+      # Assembling the bundle is the real gate: it is the same script the release
+      # pipeline runs, and it asserts the result is a signed, launchable .app.
+      - name: Assemble the app bundle
+        run: mise run bundle
+
+      # Zip with ditto, not upload-artifact's own zipping — the latter mangles
+      # symlinks and the executable bit, so the downloaded .app would not launch.
+      - name: Archive the bundle
+        run: |
+          set -euo pipefail
+          . scripts/product.env
+          ditto -c -k --keepParent "build/${PRODUCT_NAME}.app" "build/${PRODUCT_NAME}-ci.zip"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: app-bundle
+          path: build/*-ci.zip
+          retention-days: 7

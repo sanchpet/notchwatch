@@ -1,0 +1,15 @@
+# Pinned so the formatter is not a moving target across SwiftFormat releases.
+--swiftversion 5.9
+
+# Line width is SwiftLint's business (line_length 150/200); SwiftFormat must not
+# reflow code to a second, conflicting budget.
+--maxwidth none
+
+# `//` comments are prose, not API documentation — leave them alone.
+--disable docComments
+--disable wrapMultilineStatementBraces
+
+# Build products, plus the vendored third-party sources — same reasoning as the
+# `excluded:` list in .swiftlint.yml: they are kept diffable against upstream,
+# not conformed to house style. Keep the two lists in step.
+--exclude .build,build,Sources/Notchwatch/Window/CGSSpace.swift,Sources/Notchwatch/Views/Notch/NotchShape.swift

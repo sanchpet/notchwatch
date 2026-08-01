@@ -1,0 +1,302 @@
+name: Release
+
+# Builds the distributable disk image. Invoked by release-please.yml once a
+# release commit lands; can also be dispatched by hand to rehearse the pipeline
+# without publishing anything.
+#
+# Signing is optional by design. Without a Developer ID the job still produces an
+# image — clearly marked unsigned in the file name and in the release body — and
+# still succeeds. Missing credentials are a mode of operation, not a failure; a
+# broken signature, on the other hand, fails loudly.
+#
+# Third-party actions are pinned by full commit SHA (supply-chain safety).
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Git tag to build and publish (e.g. v0.2.0)
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Git tag to build and publish; leave empty for a build-only rehearsal
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# One release at a time per tag: the publish step reads the release body, edits
+# it and uploads an asset, so two runs on the same tag would interleave and one
+# would overwrite the other's notes. Never cancel — a half-cancelled release is
+# exactly the state this workflow is arranged to avoid. Untagged rehearsals key
+# on the run id so they never queue behind each other.
+concurrency:
+  group: release-${{ inputs.tag || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: macos-26
+    timeout-minutes: 60
+    permissions:
+      contents: write # upload assets to the GitHub Release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: jdx/mise-action@9e7f7633ff6f6d6048a9418a68d48f288f50eb14 # v4.2.3
+        with:
+          install: true
+          cache: true
+
+      # Secrets are read into step env rather than tested in a job-level `if`:
+      # `secrets` is not available in job conditions, and a bare `if: secrets.X`
+      # silently evaluates to false.
+      - name: Determine whether this build can be signed
+        id: gate
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # `${VAR:-}` throughout: an absent secret expands to an empty value, and
+          # whether that leaves the variable defined-but-empty or undefined is not
+          # a promise worth relying on under `set -u` — the gate must report
+          # "unsigned", never abort the job.
+          if [ -n "${CERTIFICATE_P12:-}" ] && [ -n "${CERTIFICATE_PASSWORD:-}" ] \
+            && [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] \
+            && [ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Unsigned release::Developer ID secrets are absent — publishing an unsigned, un-notarized build. Users will have to clear the quarantine attribute by hand."
+          fi
+
+      - name: Resolve the version
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          . scripts/product.env
+          if [ -n "$TAG" ]; then
+            VERSION="${TAG#v}"
+          else
+            VERSION="$(cat version.txt)"
+          fi
+          {
+            echo "PRODUCT_NAME=$PRODUCT_NAME"
+            echo "VERSION=$VERSION"
+          } >> "$GITHUB_ENV"
+
+      # Canonical Apple recipe: a throwaway keychain with a random password.
+      # set-key-partition-list is not optional — without it codesign blocks on a
+      # UI prompt that no runner can answer.
+      - name: Import the Developer ID certificate
+        if: steps.gate.outputs.signed == 'true'
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 20)"
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+
+          echo -n "$CERTIFICATE_P12" | base64 --decode -o "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT_PATH" -P "$CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+
+          rm -f "$CERT_PATH"
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+      - name: Build the app bundle
+        env:
+          # codesign matches the identity by substring against the keychain search
+          # list; "-" means ad-hoc, which is what an unsigned build gets.
+          SIGN_IDENTITY: ${{ steps.gate.outputs.signed == 'true' && 'Developer ID Application' || '-' }}
+          BUILD: ${{ github.run_number }}
+        run: mise run bundle
+
+      - name: Notarize and staple the app
+        if: steps.gate.outputs.signed == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        # Staple before packaging so the ticket travels inside the image and the
+        # app validates offline on first launch.
+        run: scripts/notarize.sh "build/${PRODUCT_NAME}.app"
+
+      - name: Package the disk image
+        env:
+          SIGNED: ${{ steps.gate.outputs.signed }}
+        run: |
+          set -euo pipefail
+          if [ "$SIGNED" = "true" ]; then
+            SUFFIX=""
+          else
+            SUFFIX="-unsigned"
+          fi
+          DMG_PATH="dist/${PRODUCT_NAME}-${VERSION}${SUFFIX}.dmg"
+          DMG_PATH="$DMG_PATH" scripts/create-dmg.sh
+          echo "DMG_PATH=$DMG_PATH" >> "$GITHUB_ENV"
+
+      - name: Sign, notarize and staple the disk image
+        if: steps.gate.outputs.signed == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          codesign --force --sign "Developer ID Application" --timestamp "$DMG_PATH"
+          scripts/notarize.sh "$DMG_PATH"
+
+      # Post-mortem check of the actual artifact. The security triad is skipped
+      # only for unsigned builds, where it cannot pass by construction.
+      - name: Verify the disk image
+        env:
+          SIGNED: ${{ steps.gate.outputs.signed }}
+        run: |
+          set -euo pipefail
+          if [ "$SIGNED" = "true" ]; then
+            scripts/verify-dmg.sh "$DMG_PATH" --expect-version "$VERSION"
+          else
+            scripts/verify-dmg.sh "$DMG_PATH" --expect-version "$VERSION" --skip-security
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: disk-image
+          path: ${{ env.DMG_PATH }}
+          retention-days: 14
+
+      # Order is the whole point of this step. The asset goes up LAST, after the
+      # release body already carries the unsigned warning, because every earlier
+      # arrangement has a window in which an unsigned, unmarked disk image is
+      # downloadable — and `set -e` means a failure between the two steps freezes
+      # the release in exactly that state rather than rolling it back.
+      - name: Publish to the GitHub Release
+        if: inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          SIGNED: ${{ steps.gate.outputs.signed }}
+        run: |
+          set -euo pipefail
+
+          # release-please has normally created (and published) the release
+          # already; a hand-dispatched tag has not. When this job creates it, it
+          # creates a draft and publishes it as the final act, so a failure
+          # anywhere below leaves nothing user-visible behind. An existing
+          # published release cannot be un-published, which is why the note
+          # ordering below has to stand on its own.
+          PUBLISH_AT_END=false
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --generate-notes
+            PUBLISH_AT_END=true
+          fi
+
+          # Markers, not prose: re-running the job must not stack the banner, and
+          # the signed path has to be able to find and remove it. Matched with a
+          # bash glob rather than `... | grep -q`: under `pipefail` an
+          # early-exiting grep can SIGPIPE gh, the pipeline then reports 141, and
+          # the guard would read as "marker absent" on every re-run — stacking
+          # the banner it exists to prevent.
+          MARKER='<!-- notchwatch:unsigned-build -->'
+          MARKER_END='<!-- /notchwatch:unsigned-build -->'
+          BODY="$(gh release view "$TAG" --json body -q .body)"
+
+          if [ "$SIGNED" = "true" ]; then
+            # The flow this pipeline exists for is "a Developer ID finally
+            # arrived, re-dispatch the tag". Skipping the banner is not enough
+            # then: the release still carries the warning from its unsigned run,
+            # now describing an asset that is signed. Strip it.
+            if [[ "$BODY" == *"$MARKER"* ]]; then
+              awk -v s="$MARKER" -v e="$MARKER_END" '
+                $0 == s { skip = 1; next }
+                $0 == e { skip = 0; next }
+                !skip
+              ' <<<"$BODY" > "$RUNNER_TEMP/notes.md"
+              gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+            fi
+
+            # The two paths name their artefacts differently
+            # (`…-<version>-unsigned.dmg` against `…-<version>.dmg`), so
+            # `--clobber` below replaces nothing: without this the unsigned image
+            # stays attached and downloadable next to the signed one. Collected
+            # into a variable first for the SIGPIPE reason above.
+            STALE="$(gh release view "$TAG" --json assets -q '.assets[].name' || true)"
+            for ASSET in $STALE; do
+              case "$ASSET" in
+                *-unsigned.dmg) gh release delete-asset "$TAG" "$ASSET" --yes ;;
+              esac
+            done
+          fi
+
+          if [ "$SIGNED" != "true" ]; then
+            if [[ "$BODY" != *"$MARKER"* ]]; then
+              # Say plainly what the user is in for. Homebrew stays out of it: a
+              # cask installs with quarantine set, so an unsigned build is
+              # download-only.
+              {
+                printf '%s\n' "$MARKER"
+                cat <<'NOTE'
+          ## ⚠️ Unsigned build
+
+          This disk image is **not signed with a Developer ID and not notarized**.
+          macOS will refuse to open it on the first attempt ("the app is damaged"
+          or "cannot be verified"). Right-click → Open no longer works on recent
+          macOS. To run it anyway:
+
+          - open **System Settings → Privacy & Security** and press *Open Anyway*
+            after the first blocked launch, or
+          - clear the quarantine attribute yourself:
+            `xattr -dr com.apple.quarantine /Applications/<App>.app`
+
+          Re-running this release once Developer ID secrets exist removes this
+          section and detaches the unsigned image.
+
+          ---
+          NOTE
+                printf '%s\n' "$MARKER_END"
+                printf '%s\n' "$BODY"
+              } > "$RUNNER_TEMP/notes.md"
+              gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+            fi
+          fi
+
+          gh release upload "$TAG" "$DMG_PATH" --clobber
+
+          if [ "$PUBLISH_AT_END" = "true" ]; then
+            gh release edit "$TAG" --draft=false
+          fi
+
+      # The one step allowed to swallow a failure, and only this one: it runs on
+      # the failure path too, and a cleanup that fails must not mask the error
+      # that got us here. The keychain holds the signing key, so deletion is
+      # attempted whatever happened above; `${KEYCHAIN:-}` is empty on the
+      # unsigned path, where there is nothing to delete.
+      - name: Remove the temporary keychain
+        if: always()
+        run: |
+          set -uo pipefail
+          if [ -n "${KEYCHAIN:-}" ]; then
+            security delete-keychain "$KEYCHAIN" || echo "::warning::failed to delete $KEYCHAIN"
+          fi

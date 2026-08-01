@@ -1,0 +1,27 @@
+name: pr-title
+
+# Squash-merge → the PR title becomes the release commit. Enforce Conventional
+# Commit, otherwise release-please cannot derive the version bump.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+# Editing a title fires this on every keystroke-sized edit. The newest title is
+# the only one that matters, so superseding is correct here (unlike the release
+# workflows, which must never be cancelled).
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  conventional:
+    name: Conventional PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

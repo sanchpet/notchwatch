@@ -1,0 +1,72 @@
+[tools]
+swiftlint = "0.65"
+swiftformat = "0.62"
+# Formats `swift build` / `swift test` output; used by CI for inline annotations.
+xcbeautify = "3"
+pre-commit = "latest"
+
+[tasks.build]
+description = "Compile the app (debug)"
+run = "swift build"
+
+[tasks."build:release"]
+description = "Compile the app (release) — what CI and the release pipeline build"
+run = "swift build -c release"
+
+[tasks.test]
+description = "Run the test suite"
+run = "swift test"
+
+[tasks."lint:swift"]
+description = "SwiftLint, warnings are errors"
+# SwiftLint loads sourcekitd from $TOOLCHAIN_DIR, falling back to
+# `$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain`. With Command Line
+# Tools only (no Xcode.app) that directory does not exist and SwiftLint dies with
+# "Loading sourcekitdInProc.framework failed" — CLT keeps the framework one level
+# up instead. Point TOOLCHAIN_DIR there when there is no Toolchains directory.
+run = '''
+set -eu
+if [ -z "${TOOLCHAIN_DIR:-}" ] && [ ! -d "$(xcode-select -p)/Toolchains" ]; then
+  TOOLCHAIN_DIR="$(xcode-select -p)"
+  export TOOLCHAIN_DIR
+fi
+swiftlint lint --strict
+'''
+
+[tasks."lint:format"]
+description = "Check formatting without rewriting anything"
+run = "swiftformat --lint ."
+
+[tasks.lint]
+description = "Swift lint + format check — what the commit hook and CI both run"
+depends = ["lint:swift", "lint:format"]
+
+# Everything that is not Swift: shellcheck over the release scripts, gitleaks,
+# YAML/JSON well-formedness. It lives behind pre-commit rather than being spelled
+# out here so the hook and CI cannot drift apart.
+#
+# Deliberately NOT a dependency of `lint`: the pre-commit config runs `mise run
+# lint` as one of its hooks, so making `lint` depend on this would recurse.
+[tasks."lint:repo"]
+description = "Non-Swift repository checks (shellcheck, gitleaks, YAML/JSON)"
+run = "pre-commit run --all-files --show-diff-on-failure"
+
+[tasks.fmt]
+description = "Format Swift sources in place"
+run = "swiftformat ."
+
+[tasks.bundle]
+description = "Assemble (and ad-hoc sign) the .app bundle from the release build"
+run = "scripts/build-app.sh"
+
+[tasks.dmg]
+description = "Package the .app built by `bundle` into a distributable .dmg"
+run = "scripts/create-dmg.sh"
+
+[tasks.ci]
+description = "Everything CI runs"
+# `bundle` is included because CI treats bundle assembly as the real gate: a
+# release build can succeed while build-app.sh fails on the Info.plist template
+# or a missing resource. Leaving it out let a contributor get a green local run
+# and still break CI at the step after the one they checked.
+depends = ["lint", "lint:repo", "build:release", "bundle"]

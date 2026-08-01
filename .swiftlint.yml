@@ -1,0 +1,48 @@
+# Deliberately unopinionated about size metrics — SwiftUI view bodies violate all
+# of them by construction — and opinionated about the two things that hide bugs:
+# force unwrapping and dead/implicit state.
+disabled_rules:
+  - trailing_comma
+  - todo
+  - type_body_length
+  - file_length
+  - function_body_length
+  - cyclomatic_complexity
+
+opt_in_rules:
+  - closure_spacing
+  - contains_over_first_not_nil
+  - empty_count
+  - force_unwrapping
+  - modifier_order
+  - unneeded_parentheses_in_closure_argument
+
+excluded:
+  - .build
+  - build
+  - .git
+  # Vendored third-party sources, listed with their provenance in LICENSE. They
+  # stay close to their upstream form so they can still be diffed against it and
+  # re-synced; restyling them to house rules would throw that away and buy
+  # nothing. CGSSpace.swift also carries MPL-2.0, where every edit is a copyleft
+  # delta this fork then has to keep publishing.
+  - Sources/Notchwatch/Window/CGSSpace.swift
+  - Sources/Notchwatch/Views/Notch/NotchShape.swift
+
+line_length:
+  warning: 150
+  error: 200
+  ignores_urls: true
+  ignores_comments: true
+
+type_name:
+  max_length:
+    warning: 60
+    error: 80
+
+identifier_name:
+  min_length: 2
+  excluded: [id, x, y, i, n, dx, dy, to, up]
+
+nesting:
+  type_level: 3

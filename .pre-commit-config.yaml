@@ -1,0 +1,57 @@
+# Run `pre-commit install --install-hooks --hook-type commit-msg` after cloning.
+# The Swift hooks shell out to the binaries pinned in mise.toml, so mise must be
+# active (they run from the repo root).
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: check-executables-have-shebangs
+      - id: detect-private-key
+      - id: mixed-line-ending
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+
+  # The release pipeline is shell; keep it warning-free.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+
+  # release-please derives the version and CHANGELOG from commit subjects, so a
+  # non-conventional subject silently breaks releases rather than failing loudly.
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  - repo: local
+    hooks:
+      # One policy: the hook runs exactly the command CI runs, over the whole
+      # tree. The staged-files-only exception is gone with the reason for it —
+      # the tree is formatted and lint-clean, so anything that fails is a
+      # regression introduced here, whether or not this commit touches the file.
+      #
+      # Check-only, never write mode: a hook that rewrites files silently
+      # restages work the author did not read. `mise run fmt` is the fix, and the
+      # failure message points at it.
+      #
+      # `files` covers the inputs to the check as well as its subjects: the two
+      # tool configs and the mise task that defines the command. Retuning a rule
+      # is therefore re-checked against the whole tree before it lands, which is
+      # the case where a green commit could otherwise hand CI a red main.
+      - id: lint
+        name: mise run lint (swiftlint --strict + swiftformat --lint)
+        entry: mise run lint
+        language: system
+        files: \.swift$|^\.swiftlint\.yml$|^\.swiftformat$|^mise\.toml$
+        pass_filenames: false

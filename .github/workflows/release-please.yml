@@ -1,0 +1,53 @@
+name: Release Please
+
+# release-please keeps version.txt and CHANGELOG.md in step with Conventional
+# Commits: every push to main opens or updates a release PR, and merging that PR
+# tags the release. Never tag or edit the changelog by hand.
+#
+# The build is chained with `needs` + a reusable workflow rather than by watching
+# for the new tag. A tag pushed by GITHUB_TOKEN does not trigger `on: push: tags`,
+# so the tag-watching design would need a long-lived PAT in the repository
+# secrets; this one needs nothing.
+#
+# Third-party actions are pinned by full commit SHA (supply-chain safety).
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Two pushes to main in quick succession would otherwise have two runs writing
+# the same release PR, and — worse — both could clear the release gate and tag.
+# Serialize; never cancel, because a cancelled run can leave the release PR
+# half-updated.
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+        id: release
+
+  release:
+    name: Release
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+    secrets: inherit
