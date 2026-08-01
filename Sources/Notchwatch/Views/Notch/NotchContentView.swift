@@ -387,6 +387,24 @@ struct NotchContentView: View {
 
             let claudeTools = claudeCodeManager.state.activeTools + claudeCodeManager.state.recentTools
 
+            // Always first, whatever the tool-display mode: it is the only line
+            // that answers "is it alive" rather than "what has it done".
+            CurrentActivityView(
+                activeTool: claudeCodeManager.state.activeTools.first,
+                lastTool: claudeCodeManager.state.recentTools.first,
+                isThinking: claudeCodeManager.state.isThinking,
+                model: extractModelName(claudeCodeManager.state.model) ?? "",
+                settings: settings,
+                powerMonitor: PowerStateMonitor.shared
+            )
+
+            // A fan-out of subagents is the one case where the session looks
+            // idle for an hour while a great deal happens. Its own journal is
+            // the only place that says how far along it is.
+            if let workflow = claudeCodeManager.workflowProgress {
+                WorkflowProgressRow(progress: workflow)
+            }
+
             if settings.toolDisplayMode == "singular" {
                 // Singular mode: show one detailed event
                 if let currentTool = claudeTools.first {
@@ -394,10 +412,19 @@ struct NotchContentView: View {
                         SingularToolDetailView(tool: currentTool, tokenUsage: claudeCodeManager.state.tokenUsage)
                     }
                 }
-            } else {
+            } else if settings.toolDisplayMode == "list" {
                 // List mode: show recent events list
                 NotchSection(title: "Recent Tools") {
                     ClaudeToolListView(tools: claudeTools, maxItems: 4)
+                }
+            }
+
+            // One row per session, so that "which session is this?" has an answer.
+            // Only worth the room when there is something to tell apart: with a
+            // single session the footer and the bar below already describe it.
+            if claudeCodeManager.availableSessions.count > 1 {
+                NotchSection(title: "Sessions") {
+                    SessionListView(manager: claudeCodeManager, settings: settings)
                 }
             }
 
@@ -411,8 +438,13 @@ struct NotchContentView: View {
                     }
             }
 
-            // Context progress bar (with integrated API usage badges)
-            if settings.showContextProgress {
+            // Context progress bar (with integrated API usage badges).
+            //
+            // Suppressed once the Sessions list is up: that list gives every
+            // session its own bar, and an unlabelled bar beneath them would be a
+            // fifth reading whose subject the panel never names — the ambiguity
+            // the list exists to remove.
+            if settings.showContextProgress, claudeCodeManager.availableSessions.count <= 1 {
                 ContextProgressBar(
                     tokenUsage: claudeCodeManager.state.tokenUsage,
                     contextLimit: settings.effectiveContextLimit(for: claudeCodeManager.state)
@@ -651,13 +683,6 @@ struct NotchContentView: View {
                 .padding(.vertical, 6)
                 .background(Color.white.opacity(0.06), in: Capsule())
             }
-        }
-
-        private func formatTokens(_ count: Int) -> String {
-            if count >= 1000 {
-                return String(format: "%.1fk", Double(count) / 1000.0)
-            }
-            return "\(count)"
         }
 
         private func formatDuration(_ duration: TimeInterval) -> String {

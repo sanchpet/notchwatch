@@ -88,8 +88,9 @@ struct GeneralSettingsTab: View {
                 Divider()
 
                 Picker("Tool display mode", selection: $settings.toolDisplayMode) {
-                    Text("Recent events list").tag("list")
+                    Text("Nothing").tag("off")
                     Text("Single detailed event").tag("singular")
+                    Text("Recent events list").tag("list")
                 }
                 .pickerStyle(.segmented)
             } header: {

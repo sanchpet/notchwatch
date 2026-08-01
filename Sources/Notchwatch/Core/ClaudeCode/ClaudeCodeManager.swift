@@ -67,6 +67,12 @@ final class ClaudeCodeManager: ObservableObject {
     /// Sessions currently waiting for user permission approval
     @Published private(set) var sessionsNeedingPermission: [ClaudeSession] = []
 
+    /// Progress of the workflow the focused session is running, when it is
+    /// running one. Refreshed on the session scan rather than on transcript
+    /// writes: a workflow's own transcript stays silent for the length of the
+    /// run, which is exactly why this readout exists.
+    @Published private(set) var workflowProgress: WorkflowProgress?
+
     // MARK: - Folded State
 
     /// Every watched session, folded into the one state the notch displays.
@@ -377,6 +383,21 @@ final class ClaudeCodeManager: ObservableObject {
         for watchedId in Array(watched.keys) where !currentIds.contains(watchedId) {
             detach(sessionKey: watchedId)
         }
+
+        refreshWorkflowProgress()
+    }
+
+    /// Progress of the focused session's workflow run, if any.
+    ///
+    /// Only the focused session is read: the panel has room for one such row,
+    /// and stat-ing every run directory of every session on a timer to fill a
+    /// line nobody can see would be work done for its own sake.
+    private func refreshWorkflowProgress() {
+        guard let key = focusedSessionKey, let transcript = watched[key]?.transcript else {
+            workflowProgress = nil
+            return
+        }
+        workflowProgress = WorkflowProgress.read(forTranscript: transcript)
     }
 
     private func startSessionScanning() {

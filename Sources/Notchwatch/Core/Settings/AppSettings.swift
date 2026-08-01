@@ -32,8 +32,13 @@ public final class AppSettings: ObservableObject {
     /// auto-detected window.
     @AppStorage("contextTokenLimitOverride") public var contextTokenLimitOverride: Int = 0
     @AppStorage("showContextProgress") public var showContextProgress: Bool = true
-    /// Display mode: "list" for recent events list, "singular" for single detailed event
-    @AppStorage("toolDisplayMode") public var toolDisplayMode: String = "list"
+    /// What to show beneath the current-activity line: "off" for nothing,
+    /// "singular" for one detailed event, "list" for the recent-events list.
+    ///
+    /// Defaults to "singular". The list answers "what has it done", which stops
+    /// being a question once the agent is trusted; the line above the list
+    /// answers "is it alive", which never does.
+    @AppStorage("toolDisplayMode") public var toolDisplayMode: String = "singular"
 
     /// Denominator the context bar measures against: the manual override when the
     /// user set one, otherwise the window resolved from the session's model, its
