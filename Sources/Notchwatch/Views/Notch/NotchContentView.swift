@@ -169,9 +169,16 @@ struct NotchContentView: View {
 
     private var notchBody: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header - always visible
+            // Header - always visible.
+            //
+            // Constrained to the cut-out's height only while closed, where the
+            // header is an empty spacer holding the silhouette. Expanded it
+            // draws a title, a session count and two buttons, none of which fit
+            // in the height of a camera housing — so the frame was clipping its
+            // own content and the first row below it.
             notchHeader
-                .frame(height: notchVM.closedNotchSize.height)
+                .frame(height: notchVM.notchState == .closed ? notchVM.closedNotchSize.height : nil)
+                .padding(.bottom, notchVM.notchState == .closed ? 0 : 8)
 
             // Expanded content
             if notchVM.notchState == .open {
