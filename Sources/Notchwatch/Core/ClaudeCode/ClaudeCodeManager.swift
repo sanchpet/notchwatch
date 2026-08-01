@@ -50,6 +50,35 @@ final class ClaudeCodeManager: ObservableObject {
 
     // MARK: - Cached Formatters
 
+    /// Entry timestamps are ISO-8601 with fractional seconds
+    /// (`2026-08-01T15:03:42.532Z`). Two parsers because `ISO8601DateFormatter`
+    /// matches fractional seconds only when told to, and refuses a string
+    /// without them when it is.
+    private static let entryTimestampParsers: [ISO8601DateFormatter] = {
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return [withFraction, plain]
+    }()
+
+    /// When the transcript says an entry happened, or now when it does not say.
+    ///
+    /// Wall-clock at parse time is not a substitute: history replayed on attach
+    /// is parsed in one burst, so every tool in it starts and ends at the same
+    /// instant and reports a duration of zero — and even live, the pair of lines
+    /// for a fast tool usually lands in a single read. What that measured was
+    /// when Notchwatch noticed, not when anything took place.
+    private static func entryDate(_ json: [String: Any]) -> Date {
+        guard let raw = json["timestamp"] as? String else { return Date() }
+        for parser in entryTimestampParsers {
+            if let date = parser.date(from: raw) {
+                return date
+            }
+        }
+        return Date()
+    }
+
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -677,7 +706,7 @@ final class ClaudeCodeManager: ObservableObject {
         }
 
         if let message = json["message"] as? [String: Any] {
-            applyMessage(message, sessionKey: sessionKey)
+            applyMessage(message, sessionKey: sessionKey, at: Self.entryDate(json))
         }
 
         // Every branch above may have told the tracker something — a boundary, a
@@ -702,7 +731,7 @@ final class ClaudeCodeManager: ObservableObject {
         objectWillChange.send()
     }
 
-    private func applyMessage(_ message: [String: Any], sessionKey: String) {
+    private func applyMessage(_ message: [String: Any], sessionKey: String, at entryDate: Date) {
         guard var sessionState = sessionStates[sessionKey] else { return }
 
         // Claude Code writes `<synthetic>` messages for locally generated errors
@@ -734,7 +763,7 @@ final class ClaudeCodeManager: ObservableObject {
         // --- control plane: only while no hook has spoken for this session -----
 
         if watched[sessionKey]?.isHookDriven != true {
-            applyTranscriptControlPlane(message, to: &sessionState, sessionKey: sessionKey)
+            applyTranscriptControlPlane(message, to: &sessionState, sessionKey: sessionKey, at: entryDate)
         }
 
         sessionStates[sessionKey] = sessionState
@@ -745,7 +774,8 @@ final class ClaudeCodeManager: ObservableObject {
     private func applyTranscriptControlPlane(
         _ message: [String: Any],
         to sessionState: inout ClaudeCodeState,
-        sessionKey: String
+        sessionKey: String,
+        at entryDate: Date
     ) {
         if let stopReason = message["stop_reason"] as? String {
             sessionState.lastStopReason = stopReason
@@ -795,13 +825,13 @@ final class ClaudeCodeManager: ObservableObject {
                     sessionState.todos = Self.parseTodos(todos)
                 }
 
-                sessionState.activeTools.append(makeTool(id: toolId, name: toolName, input: input))
+                sessionState.activeTools.append(makeTool(id: toolId, name: toolName, input: input, at: entryDate))
                 startPermissionCheck(sessionKey: sessionKey, toolId: toolId, toolName: toolName)
 
             case "tool_result":
                 guard role == "user", let toolUseId = item["tool_use_id"] as? String else { continue }
                 clearPermissionCheck(sessionKey: sessionKey, toolId: toolUseId, in: &sessionState)
-                completeTool(id: toolUseId, in: &sessionState)
+                completeTool(id: toolUseId, in: &sessionState, at: entryDate)
                 sessionState.isThinking = true
 
             default:
@@ -823,12 +853,17 @@ final class ClaudeCodeManager: ObservableObject {
 
     // MARK: - Tool Bookkeeping
 
-    private func makeTool(id: String, name: String, input: [String: Any]?) -> ClaudeToolExecution {
+    private func makeTool(
+        id: String,
+        name: String,
+        input: [String: Any]?,
+        at startTime: Date = Date()
+    ) -> ClaudeToolExecution {
         var tool = ClaudeToolExecution(
             id: id,
             toolName: name,
             argument: Self.extractToolArgument(from: input),
-            startTime: Date()
+            startTime: startTime
         )
         tool.description = input?["description"] as? String
         tool.timeout = input?["timeout"] as? Int
@@ -837,11 +872,13 @@ final class ClaudeCodeManager: ObservableObject {
 
     /// Move a running tool to the recent list, stamping it with the usage read at
     /// the moment it finished.
-    private func completeTool(id: String, in sessionState: inout ClaudeCodeState) {
+    private func completeTool(id: String, in sessionState: inout ClaudeCodeState, at endTime: Date = Date()) {
         guard let index = sessionState.activeTools.firstIndex(where: { $0.id == id }) else { return }
 
         var tool = sessionState.activeTools.remove(at: index)
-        tool.endTime = Date()
+        // Never before it started: a clock skew or a reordered pair would
+        // otherwise produce a negative duration rendered as a huge one.
+        tool.endTime = max(endTime, tool.startTime)
         tool.inputTokens = sessionState.tokenUsage.inputTokens
         tool.outputTokens = sessionState.tokenUsage.outputTokens
         tool.cacheReadTokens = sessionState.tokenUsage.cacheReadInputTokens
