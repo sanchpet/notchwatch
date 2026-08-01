@@ -357,7 +357,7 @@ final class ClaudeCodeManager: ObservableObject {
                 guard let data = fm.contents(atPath: lockFile.path),
                       let session = try? JSONDecoder().decode(ClaudeSession.self, from: data),
                       isProcessRunning(pid: session.pid) else { continue }
-                sessions.append(session)
+                sessions.append(contentsOf: expand(lock: session))
             }
         }
 
@@ -427,6 +427,50 @@ final class ClaudeCodeManager: ObservableObject {
             return
         }
         workflowProgress = WorkflowProgress.read(forTranscript: transcript)
+    }
+
+    /// One session per live transcript of the locked project.
+    ///
+    /// An editor lock names a *project*, not a session — it carries a workspace
+    /// path and the editor's pid, and nothing that distinguishes one Claude Code
+    /// session in that project from another. Resolving it to a single transcript
+    /// therefore picked whichever file was touched last and made every other
+    /// session of that project invisible: not watched, not counted, not eligible
+    /// to be focused. Sessions are keyed by workspace path plus transcript id,
+    /// the same shape the terminal scan already builds, so each gets its own row
+    /// while `pid` and `ideName` stay attached and the editor is still reachable
+    /// from any of them.
+    ///
+    /// A lock whose project has no recent transcript expands to nothing: an
+    /// editor left open on a project is not a session, and answering with the
+    /// newest stale file is the defect this replaces.
+    private func expand(lock session: ClaudeSession) -> [ClaudeSession] {
+        // The editor being alive is evidence that the project is in use, so this
+        // window is wider than the terminal scan's — that one has only a file
+        // modification time to go on.
+        let cutoff = Date().addingTimeInterval(-1800)
+        guard let workspace = session.workspaceFolders.first,
+              !workspace.contains("#") else { return [session] }
+
+        var expanded: [ClaudeSession] = []
+        for projectsDir in projectsDirs {
+            let dir = projectsDir.appendingPathComponent(
+                workspace.replacingOccurrences(of: "/", with: "-")
+            )
+            for transcript in findActiveSessionFiles(in: dir) {
+                let modified = (try? transcript.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate ?? .distantPast
+                guard modified > cutoff else { continue }
+                expanded.append(ClaudeSession(
+                    pid: session.pid,
+                    workspaceFolders: ["\(workspace)#\(transcript.deletingPathExtension().lastPathComponent)"],
+                    ideName: session.ideName,
+                    transport: session.transport,
+                    runningInWindows: session.runningInWindows
+                ))
+            }
+        }
+        return expanded
     }
 
     private func startSessionScanning() {
