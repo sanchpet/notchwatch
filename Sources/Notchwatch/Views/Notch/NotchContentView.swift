@@ -9,9 +9,18 @@ struct NotchContentView: View {
     @State private var sessionStart = Date()
     @State private var showStartupGlow = false
     @State private var startupGlowTask: Task<Void, Never>?
-    @State private var showPermissionNotice = false
+    /// What the peek is currently saying. One value rather than a pair of
+    /// booleans with a fallback: the fallback was reachable — clearing a flag
+    /// because the underlying condition ended, while the peek it belongs to was
+    /// still on screen, swapped the notice for a stray token count mid-display.
+    /// A notice now lives exactly as long as the peek that carries it.
+    private enum PeekNotice: Equatable {
+        case permission
+        case turnDone
+    }
+
+    @State private var peekNotice: PeekNotice?
     @State private var permissionToolName: String?
-    @State private var showTurnDoneNotice = false
     @State private var turnDoneProject: String?
     @State private var turnDoneSummary: String?
 
@@ -113,20 +122,22 @@ struct NotchContentView: View {
                 .onChange(of: claudeCodeManager.sessionsAwaitingUser.count) { oldCount, newCount in
                     // Only on the way up. Sessions finishing one after another
                     // each deserve a notice; the count falling is a session
-                    // resuming, which is not news.
+                    // resuming, which is not news — and must not disturb a
+                    // notice already being shown.
                     if newCount > oldCount {
                         triggerTurnDoneNotice()
-                    } else if newCount == 0 {
-                        showTurnDoneNotice = false
+                    }
+                }
+                .onChange(of: notchVM.notchState) { _, newState in
+                    // The notice belongs to the peek. When the peek is over —
+                    // by timeout or because the user opened the panel — it goes.
+                    if newState != .peeking {
+                        peekNotice = nil
                     }
                 }
                 .onChange(of: claudeCodeManager.sessionsNeedingPermission.count) { oldCount, newCount in
                     if newCount > oldCount {
-                        // New permission request - show dropdown
                         triggerPermissionNotice()
-                    } else if newCount == 0 {
-                        // Permission granted/denied - hide notice
-                        showPermissionNotice = false
                     }
                 }
                 .shadow(
@@ -322,6 +333,20 @@ struct NotchContentView: View {
             .frame(maxWidth: notchVM.geometry.maxTrayWidth)
             .fixedSize(horizontal: true, vertical: true)
             .background(Color.black, in: Capsule())
+            // The waiting signal lands here as much as on the cut-out. The
+            // cut-out has almost no visible perimeter — its top is behind the
+            // camera housing and the mask trims the rest — so an outline there
+            // shows as two lit corners however heavy it is drawn. The tray is
+            // wide, fully on screen, and already where the eye goes.
+            .overlay {
+                if !claudeCodeManager.sessionsAwaitingUser.isEmpty {
+                    Capsule()
+                        .stroke(awaitingBrightColor, lineWidth: 2)
+                        .shadow(color: awaitingGlowColor.opacity(0.9), radius: 6)
+                        .shadow(color: awaitingGlowColor.opacity(0.6), radius: 14)
+                        .shadow(color: awaitingGlowColor.opacity(0.3), radius: 24)
+                }
+            }
             .padding(.top, 4)
             .onHover { hovering in
                 // The tray vanishes into the panel it opens, so its own
@@ -566,28 +591,17 @@ struct NotchContentView: View {
 
     @ViewBuilder
     private var peekContent: some View {
-        if showPermissionNotice {
+        switch peekNotice {
+        case .permission:
             permissionContent
-        } else if showTurnDoneNotice {
+        case .turnDone:
             turnDoneContent
-        } else {
-            VStack(spacing: 8) {
-                if settings.showNotchTokenCount, recentTokenTotal > 0 {
-                    HStack(spacing: 6) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.6))
-
-                        Text("\(recentTokenTotal) t")
-                            .font(.system(size: 14, weight: .medium, design: .monospaced))
-                            .foregroundColor(.white)
-
-                        Spacer()
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
+        case nil:
+            // A peek is only ever raised to carry a notice, so there is nothing
+            // to fall back to. What used to be here — a token count — was never
+            // requested by anything and only appeared when a notice was cleared
+            // out from under its own peek.
+            EmptyView()
         }
     }
 
@@ -1052,9 +1066,10 @@ struct NotchContentView: View {
         turnDoneProject = session?.displayName
         turnDoneSummary = state?.lastAssistantSummary
 
-        showPermissionNotice = false
-        showTurnDoneNotice = true
-        notchVM.peek(duration: 4.0)
+        peekNotice = .turnDone
+        // Long enough to read a project name and a line of prose without
+        // hurrying, short enough not to sit over the menu bar.
+        notchVM.peek(duration: 9.0)
     }
 
     private func triggerPermissionNotice() {
@@ -1066,20 +1081,11 @@ struct NotchContentView: View {
             permissionToolName = claudeCodeManager.state.pendingPermissionTool
         }
 
-        showPermissionNotice = true
-        notchVM.peek(duration: 5.0)
-
-        // Auto-hide after duration
-        Task {
-            try? await Task.sleep(for: .seconds(5))
-            await MainActor.run {
-                if showPermissionNotice {
-                    withAnimation(.easeOut(duration: 0.3)) {
-                        showPermissionNotice = false
-                    }
-                }
-            }
-        }
+        peekNotice = .permission
+        // No separate hide timer: the peek owns the lifetime and clears the
+        // notice when it ends. A second timer on a different duration was how
+        // the notice could vanish while its own peek was still on screen.
+        notchVM.peek(duration: 9.0)
     }
 
     private func triggerStartupGlow() {
