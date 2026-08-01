@@ -1067,9 +1067,7 @@ struct NotchContentView: View {
         turnDoneSummary = state?.lastAssistantSummary
 
         peekNotice = .turnDone
-        // Long enough to read a project name and a line of prose without
-        // hurrying, short enough not to sit over the menu bar.
-        notchVM.peek(duration: 9.0)
+        notchVM.peek(duration: settings.noticeDurationSeconds)
     }
 
     private func triggerPermissionNotice() {
@@ -1085,7 +1083,7 @@ struct NotchContentView: View {
         // No separate hide timer: the peek owns the lifetime and clears the
         // notice when it ends. A second timer on a different duration was how
         // the notice could vanish while its own peek was still on screen.
-        notchVM.peek(duration: 9.0)
+        notchVM.peek(duration: settings.noticeDurationSeconds)
     }
 
     private func triggerStartupGlow() {

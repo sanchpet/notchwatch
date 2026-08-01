@@ -87,6 +87,14 @@ struct GeneralSettingsTab: View {
 
                 Divider()
 
+                Picker("Notice duration", selection: $settings.noticeDurationSeconds) {
+                    Text("3 seconds").tag(3.0)
+                    Text("5 seconds").tag(5.0)
+                    Text("9 seconds").tag(9.0)
+                    Text("15 seconds").tag(15.0)
+                    Text("30 seconds").tag(30.0)
+                }
+
                 Picker("Tool display mode", selection: $settings.toolDisplayMode) {
                     Text("Nothing").tag("off")
                     Text("Single detailed event").tag("singular")

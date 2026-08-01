@@ -152,6 +152,8 @@ showPermissionIndicator: Bool = true
 showTodoList: Bool = true
 showThinkingState: Bool = true
 
+noticeDurationSeconds: Double = 9   // how long a peek notice stays up
+
 // Context & Display
 contextTokenLimitOverride: Int = 0  // 0 = derive the window from the model
 showContextProgress: Bool = true

@@ -32,6 +32,14 @@ public final class AppSettings: ObservableObject {
     /// auto-detected window.
     @AppStorage("contextTokenLimitOverride") public var contextTokenLimitOverride: Int = 0
     @AppStorage("showContextProgress") public var showContextProgress: Bool = true
+    /// How long a peek notice stays on screen, in seconds.
+    ///
+    /// Taste, not correctness: the notice is a courtesy, and the state it
+    /// announces outlives it either way — the waiting glow holds until the
+    /// session is answered. So this can be short for someone who only wants the
+    /// nudge, or long for someone who wants to read the line without hurrying.
+    @AppStorage("noticeDurationSeconds") public var noticeDurationSeconds: Double = 9
+
     /// What to show beneath the current-activity line: "off" for nothing,
     /// "singular" for one detailed event, "list" for the recent-events list.
     ///
