@@ -19,7 +19,7 @@ Two sources, and the app works with either one alone:
 
 ## Install
 
-Builds are published as a `.dmg` on the [Releases](https://github.com/sanchpet/agentnotch/releases) page; drag the app to `/Applications`.
+Builds are published as a `.dmg` on the [Releases](https://github.com/sanchpet/notchwatch/releases) page; drag the app to `/Applications`.
 
 No release has been published yet — the current version is `0.0.0`. Until the first one lands, build it yourself: see [Development](#development), it takes about a minute.
 

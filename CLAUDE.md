@@ -229,7 +229,7 @@ cannot be smaller than a prompt that fit in it.
 ## Release Process
 Fully automated; nothing is built or tagged by hand. release-please (`release-type: simple`) reads Conventional Commits, opens a release PR, and merging it tags the version and calls `.github/workflows/release.yml`, which runs `mise run bundle` (i.e. `scripts/build-app.sh`), `scripts/create-dmg.sh` and `scripts/verify-dmg.sh`, then uploads the `.dmg` to the GitHub Release. Never hand-edit `CHANGELOG.md`, `version.txt`, `.release-please-manifest.json`, or the tags.
 
-Everything publishes to **this** repository's Releases — `sanchpet/agentnotch`. Nothing is pushed upstream, and there is no Homebrew tap or cask: a cask installs with quarantine set, so it only becomes worth having once builds are signed. Do not add one before then.
+Everything publishes to **this** repository's Releases — `sanchpet/notchwatch`. Nothing is pushed upstream, and there is no Homebrew tap or cask: a cask installs with quarantine set, so it only becomes worth having once builds are signed. Do not add one before then.
 
 Signing is optional: without the five Developer ID secrets the pipeline still produces an image, named `<Product>-<version>-unsigned.dmg`, and prepends an "Unsigned build" note to the release body. Nothing has been released yet — `version.txt` and the manifest are both at `0.0.0`.
 
