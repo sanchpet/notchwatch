@@ -275,10 +275,14 @@ struct NotchContentView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            // No width arithmetic: the row is as wide as its content, and the
-            // labels truncate themselves once the panel's budget runs out.
+            // `maxWidth` alone is a budget, not a limit: a flexible frame takes
+            // the whole width it is offered, so the capsule painted 532 pt of
+            // black across whatever window sat beneath it to say "1 session".
+            // Fixing the horizontal axis proposes the content's ideal width to
+            // the frame instead, which the frame still clamps to the budget — so
+            // a long tool name truncates at the cap rather than escaping it.
             .frame(maxWidth: notchVM.geometry.maxTrayWidth)
-            .fixedSize(horizontal: false, vertical: true)
+            .fixedSize(horizontal: true, vertical: true)
             .background(Color.black, in: Capsule())
             .padding(.top, 4)
             .onHover { hovering in
