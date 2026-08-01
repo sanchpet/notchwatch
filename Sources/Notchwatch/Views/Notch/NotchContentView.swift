@@ -168,6 +168,8 @@ struct NotchContentView: View {
                 case .close: notchVM.close()
                 case .toggle: notchVM.toggle()
                 case .peek: notchVM.peek(duration: settings.noticeDurationSeconds)
+                case .demoOn: claudeCodeManager.enterDemoMode()
+                case .demoOff: claudeCodeManager.exitDemoMode()
                 }
             }
         }

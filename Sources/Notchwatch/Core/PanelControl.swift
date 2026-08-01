@@ -33,6 +33,10 @@ enum PanelControl {
         case close
         case peek
         case toggle
+        /// Fabricated sessions, so that documentation never photographs real
+        /// work. See `DemoScenario`.
+        case demoOn = "demo-on"
+        case demoOff = "demo-off"
     }
 
     /// Namespaced by bundle id: distributed notifications are machine-wide.

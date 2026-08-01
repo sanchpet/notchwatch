@@ -4,6 +4,10 @@ Claude Code session state in the notch of your Mac.
 
 Notchwatch is a menu-bar/notch companion for [Claude Code](https://claude.com/claude-code). It sits in the notch (or the menu bar on Macs without one) and shows what the agent is doing right now: the tool it is running, whether it is thinking, whether it is waiting for a permission decision, the current todo list, elapsed time, git branch, token usage and how much of the context window is left.
 
+![The expanded panel: current tool with a clock, workflow progress, and one row per live session with its own context bar](docs/panel.png)
+
+The screenshot is the demo fixture rather than a real desktop — see [Screenshots](#screenshots). Closed, all of this collapses to a single capsule under the cut-out saying what is running; the outline turns green and stays green when a session finishes and the turn is yours.
+
 It watches local files only. It is not a client for anything, it holds no credentials, and it makes no network requests — there is no `URLSession`, no `Network` import and no socket anywhere in `Sources/`, and the app ships with an empty entitlements file.
 
 ## Scope
@@ -76,6 +80,29 @@ Changed:
 - The git branch badge is resolved from the session's working directory by reading `.git/HEAD`, not taken from a field in the transcript that reported the literal string `HEAD` on detached checkouts.
 - Notch geometry is read from the display's own `auxiliaryTopLeftArea`/`auxiliaryTopRightArea` and recomputed when the display configuration changes, rather than measured once at launch.
 - Hook support (above) is new; upstream had none.
+
+## Screenshots
+
+Every pixel of the panel reports on the user's own work — project names, branches, the command being run, the first line of what the agent just said. A screenshot of real use is therefore a screenshot of somebody's private activity, so the app can fabricate a session set instead:
+
+```sh
+Notchwatch.app/Contents/MacOS/Notchwatch --panel demo-on
+Notchwatch.app/Contents/MacOS/Notchwatch --panel open
+# … capture …
+Notchwatch.app/Contents/MacOS/Notchwatch --panel demo-off
+```
+
+The fixture lives in `Sources/Notchwatch/Core/ClaudeCode/DemoScenario.swift`. It also reaches states real work will not pose on request: a session nearly out of context, one waiting on you, a workflow half finished.
+
+## Driving the panel
+
+The panel opens by clicking it, and by asking:
+
+```sh
+Notchwatch --panel open|close|toggle|peek
+```
+
+Deliberately not implemented with synthesised clicks. Doing that needs macOS Accessibility, which cannot be scoped to one application — it is the right to send input into any window on the machine. An app may show its own panel without any permission at all, so it is asked directly. The transport is a distributed notification: nothing is written, and with no instance running nothing happens.
 
 ## Development
 

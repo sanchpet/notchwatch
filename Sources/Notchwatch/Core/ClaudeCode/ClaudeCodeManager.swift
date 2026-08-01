@@ -325,6 +325,46 @@ final class ClaudeCodeManager: ObservableObject {
 
     // MARK: - Public Methods
 
+    /// Whether the panel is showing fabricated sessions instead of real ones.
+    @Published private(set) var isDemoMode = false
+
+    /// Replace every reading with the demo fixture.
+    ///
+    /// Watching stops rather than being ignored: leaving the timers running
+    /// would have a real scan overwrite the fixture between a command and a
+    /// screenshot, which is the sort of flake that wastes an afternoon.
+    func enterDemoMode() {
+        guard !isDemoMode else { return }
+        isDemoMode = true
+
+        sessionScanTimer?.invalidate()
+        sessionScanTimer = nil
+        for key in Array(watched.keys) {
+            detach(sessionKey: key)
+        }
+
+        let fixture = DemoScenario.make()
+        availableSessions = fixture.sessions
+        sessionStates = fixture.states
+        workflowProgress = fixture.workflow
+        updateSessionsNeedingPermission()
+        objectWillChange.send()
+    }
+
+    /// Drop the fixture and go back to watching the machine.
+    func exitDemoMode() {
+        guard isDemoMode else { return }
+        isDemoMode = false
+
+        sessionStates.removeAll()
+        availableSessions.removeAll()
+        workflowProgress = nil
+
+        scanForSessions()
+        startSessionScanning()
+        objectWillChange.send()
+    }
+
     /// Manually refresh state
     func refresh() {
         scanForSessions()
@@ -379,6 +419,8 @@ final class ClaudeCodeManager: ObservableObject {
 
     /// Scan for active Claude Code sessions
     func scanForSessions() {
+        // A stray refresh must not undo the fixture.
+        guard !isDemoMode else { return }
         let fm = FileManager.default
         var sessions: [ClaudeSession] = []
 

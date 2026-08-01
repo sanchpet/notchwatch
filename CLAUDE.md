@@ -226,6 +226,19 @@ cannot be smaller than a prompt that fit in it.
 - `promptTokens` against `AppSettings.effectiveContextLimit(for:)`
 - Colors: green (≤50%), yellow (>50%), orange (>70%), red (>90%)
 
+## Panel Control and the Demo Fixture
+`--panel open|close|toggle|peek|demo-on|demo-off` talks to a running instance over
+a distributed notification (`PanelControl`). The sender turns its run loop briefly
+before exiting — the post goes to the system broker over XPC and is lost if the
+process dies first, which is how the first version failed silently.
+
+Demo mode swaps every reading for `DemoScenario`'s fixture and **stops the
+watchers**, rather than letting them run and be ignored: a scan landing between a
+command and a screenshot would overwrite the fixture. `scanForSessions` returns
+early while it is on. Screenshots for documentation are taken this way and never
+from real sessions — the panel displays the user's own work, so a real capture is
+a capture of private activity.
+
 ## Release Process
 Fully automated; nothing is built or tagged by hand. release-please (`release-type: simple`) reads Conventional Commits, opens a release PR, and merging it tags the version and calls `.github/workflows/release.yml`, which runs `mise run bundle` (i.e. `scripts/build-app.sh`), `scripts/create-dmg.sh` and `scripts/verify-dmg.sh`, then uploads the `.dmg` to the GitHub Release. Never hand-edit `CHANGELOG.md`, `version.txt`, `.release-please-manifest.json`, or the tags.
 
