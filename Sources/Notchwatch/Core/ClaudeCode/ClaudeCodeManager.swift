@@ -452,7 +452,7 @@ final class ClaudeCodeManager: ObservableObject {
         guard let workspace = session.workspaceFolders.first,
               !workspace.contains("#") else { return [session] }
 
-        var expanded: [ClaudeSession] = []
+        var live: [URL] = []
         for projectsDir in projectsDirs {
             let dir = projectsDir.appendingPathComponent(
                 workspace.replacingOccurrences(of: "/", with: "-")
@@ -461,16 +461,25 @@ final class ClaudeCodeManager: ObservableObject {
                 let modified = (try? transcript.resourceValues(forKeys: [.contentModificationDateKey]))?
                     .contentModificationDate ?? .distantPast
                 guard modified > cutoff else { continue }
-                expanded.append(ClaudeSession(
-                    pid: session.pid,
-                    workspaceFolders: ["\(workspace)#\(transcript.deletingPathExtension().lastPathComponent)"],
-                    ideName: session.ideName,
-                    transport: session.transport,
-                    runningInWindows: session.runningInWindows
-                ))
+                live.append(transcript)
             }
         }
-        return expanded
+
+        // Only when the project has exactly one live transcript can the lock's
+        // editor be attributed to it. With several, the lock says which editor
+        // is open, not which of them hosts which session — most are running in
+        // a terminal — so claiming its identity for all of them makes "go to
+        // this session" open the wrong application, confidently.
+        let host = live.count == 1 ? session.ideName : ClaudeSession.unknownHost
+        return live.map { transcript in
+            ClaudeSession(
+                pid: session.pid,
+                workspaceFolders: ["\(workspace)#\(transcript.deletingPathExtension().lastPathComponent)"],
+                ideName: host,
+                transport: session.transport,
+                runningInWindows: session.runningInWindows
+            )
+        }
     }
 
     private func startSessionScanning() {
@@ -870,7 +879,6 @@ final class ClaudeCodeManager: ObservableObject {
                 }
 
                 sessionState.activeTools.append(makeTool(id: toolId, name: toolName, input: input, at: entryDate))
-                startPermissionCheck(sessionKey: sessionKey, toolId: toolId, toolName: toolName)
 
             case "tool_result":
                 guard role == "user", let toolUseId = item["tool_use_id"] as? String else { continue }
@@ -1007,7 +1015,6 @@ final class ClaudeCodeManager: ObservableObject {
                 sessionState.todos = Self.parseTodos(todos)
             }
             sessionState.activeTools.append(makeTool(id: toolId, name: toolName, input: event.toolInput))
-            startPermissionCheck(sessionKey: sessionKey, toolId: toolId, toolName: toolName)
             resetToolIdleTimer()
 
         case .postToolUse:
@@ -1117,19 +1124,19 @@ final class ClaudeCodeManager: ObservableObject {
         return false
     }
 
-    private func startPermissionCheck(sessionKey: String, toolId: String, toolName: String) {
-        guard !loadingHistory.contains(sessionKey), isPermissionEligible(toolName) else { return }
-
-        pendingToolChecks[sessionKey, default: [:]][toolId] = Date()
-
-        guard permissionCheckTimer == nil else { return }
-        permissionCheckTimer = Timer.scheduledTimer(withTimeInterval: permissionCheckDelay, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.checkPendingPermissions()
-            }
-        }
-    }
-
+    /// A blocked tool is reported by the `Notification` hook and by nothing else.
+    ///
+    /// This used to be inferred from elapsed time: a tool still running after
+    /// five seconds was declared to be awaiting permission. That is a guess
+    /// presented as a fact, and it is wrong in the ordinary case — a test run, a
+    /// release build and a large grep all outlive the threshold while nobody is
+    /// being asked anything, and in bypass mode nothing is ever asked at all.
+    /// A permission indicator that fires on every slow command is one the user
+    /// learns to ignore, which costs more than having none.
+    ///
+    /// So there is no inference here any more. With hooks registered the signal
+    /// is exact; without them the app says nothing about permissions, which is
+    /// the honest thing for it to say.
     private func clearPermissionCheck(sessionKey: String, toolId: String, in sessionState: inout ClaudeCodeState) {
         pendingToolChecks[sessionKey]?.removeValue(forKey: toolId)
 

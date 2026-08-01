@@ -11,6 +11,12 @@ import Foundation
 
 /// Represents an active Claude Code IDE session from ~/.claude/ide/*.lock
 struct ClaudeSession: Identifiable, Codable, Equatable {
+    /// Marks a session whose host application is not knowable. A transcript
+    /// records no parent process, so nothing connects it to the terminal or
+    /// editor it runs in; only an editor lock claims a host, and only when the
+    /// project holds a single session can that claim be trusted.
+    static let unknownHost = "Unknown"
+
     var id: String {
         "\(ideName):\(workspaceFolders.first ?? "\(pid)")"
     }

@@ -562,12 +562,19 @@ struct NotchContentView: View {
 
                 Spacer()
 
-                Text("Check Terminal")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.orange)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.orange.opacity(0.2), in: Capsule())
+                // Named after the host the session actually reports. It used to
+                // read "Check Terminal" unconditionally while the tap activated
+                // whatever the editor lock claimed — so a session running in a
+                // terminal sent you to VS Code, which is worse than no button.
+                if let host = claudeCodeManager.sessionsNeedingPermission.first?.ideName,
+                   host != ClaudeSession.unknownHost {
+                    Text("Open \(host)")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.orange.opacity(0.2), in: Capsule())
+                }
             }
         }
         .padding(.horizontal, 16)
