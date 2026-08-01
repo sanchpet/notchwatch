@@ -13,6 +13,16 @@ struct NotchGlowBorder: View {
     /// what makes the border legible in peripheral vision, where the stroke
     /// itself is too fine to register.
     var glowStrength: CGFloat = 1.0
+    /// Draw the whole edge at once instead of sweeping a highlight around it.
+    ///
+    /// The sweeping gradient leaves 40% of the circle fully transparent and
+    /// gives full colour to a narrow arc, so at any instant most of the border
+    /// is not there. That reads as motion, which is the right way to say "work
+    /// is happening" and the wrong way to say "this is waiting for you" — a
+    /// standing state wants a standing outline. It also stops the animation:
+    /// waiting can last for as long as the user is away, and a signal that means
+    /// "come back" should not cost frames while nobody is looking.
+    var isSteady: Bool = false
 
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var powerMonitor = PowerStateMonitor.shared
@@ -26,6 +36,37 @@ struct NotchGlowBorder: View {
     }
 
     var body: some View {
+        if isSteady {
+            steadyBorder
+        } else {
+            sweepingBorder
+        }
+    }
+
+    private var steadyBorder: some View {
+        NotchShape(topCornerRadius: topCornerRadius, bottomCornerRadius: bottomCornerRadius)
+            .stroke(
+                LinearGradient(
+                    colors: [brightColor, glowColor, brightColor],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                ),
+                lineWidth: lineWidth
+            )
+            .shadow(color: glowColor.opacity(0.9), radius: 6 * glowStrength)
+            .shadow(color: glowColor.opacity(0.6), radius: 14 * glowStrength)
+            .shadow(color: glowColor.opacity(0.35), radius: 26 * glowStrength)
+            .shadow(color: glowColor.opacity(0.2), radius: 40 * glowStrength)
+            .mask(
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: 4)
+                    Color.white
+                }
+            )
+            .allowsHitTesting(false)
+    }
+
+    private var sweepingBorder: some View {
         TimelineView(.animation(minimumInterval: frameInterval)) { timeline in
             let time = timeline.date.timeIntervalSinceReferenceDate
             let rotation = (time.truncatingRemainder(dividingBy: 2.0)) / 2.0 * 360

@@ -97,8 +97,9 @@ struct NotchContentView: View {
                             bottomCornerRadius: bottomCornerRadius,
                             glowColor: awaitingGlowColor,
                             brightColor: awaitingBrightColor,
-                            lineWidth: 4.5,
-                            glowStrength: 1.6
+                            lineWidth: 7,
+                            glowStrength: 2.2,
+                            isSteady: true
                         )
                     } else if claudeCodeManager.hasAnySessionActivity, notchVM.notchState == .closed {
                         NotchGlowBorder(
