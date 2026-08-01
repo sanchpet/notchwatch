@@ -5,6 +5,14 @@ struct NotchGlowBorder: View {
     let bottomCornerRadius: CGFloat
     let glowColor: Color
     let brightColor: Color
+    /// Weight of the traced edge. The default suits the activity glow, which is
+    /// ambient and running most of the time; a signal that has to be noticed
+    /// rather than merely seen is given a heavier one.
+    var lineWidth: CGFloat = 2.5
+    /// Multiplies the halo. Same reasoning as `lineWidth`: the outer bloom is
+    /// what makes the border legible in peripheral vision, where the stroke
+    /// itself is too fine to register.
+    var glowStrength: CGFloat = 1.0
 
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var powerMonitor = PowerStateMonitor.shared
@@ -42,11 +50,11 @@ struct NotchGlowBorder: View {
                     startAngle: .degrees(rotation),
                     endAngle: .degrees(rotation + 360)
                 ),
-                lineWidth: 2.5
+                lineWidth: lineWidth
             )
-            .shadow(color: glowColor.opacity(0.7), radius: 8)
-            .shadow(color: glowColor.opacity(0.4), radius: 16)
-            .shadow(color: glowColor.opacity(0.2), radius: 24)
+            .shadow(color: glowColor.opacity(0.7 * glowStrength), radius: 8 * glowStrength)
+            .shadow(color: glowColor.opacity(0.4 * glowStrength), radius: 16 * glowStrength)
+            .shadow(color: glowColor.opacity(0.2 * glowStrength), radius: 24 * glowStrength)
             .mask(
                 VStack(spacing: 0) {
                     Color.clear.frame(height: 4)

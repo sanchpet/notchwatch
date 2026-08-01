@@ -132,3 +132,45 @@ struct WorkflowProgressRow: View {
         .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
     }
 }
+
+/// The hand-back notice: which session stopped, and what it last said.
+struct TurnDoneNotice: View {
+    let project: String?
+    let summary: String?
+
+    private let awaitingColor = Color(red: 0.3, green: 0.85, blue: 0.55)
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(awaitingColor)
+                .frame(width: 10, height: 10)
+                .shadow(color: awaitingColor.opacity(0.6), radius: 4)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text("Your turn")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+
+                    if let project, !project.isEmpty {
+                        Text(project)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.55))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+
+                if let summary, !summary.isEmpty {
+                    Text(summary)
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.7))
+                        .lineLimit(2)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+}

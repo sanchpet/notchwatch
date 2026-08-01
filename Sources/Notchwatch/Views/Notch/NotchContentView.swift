@@ -11,6 +11,9 @@ struct NotchContentView: View {
     @State private var startupGlowTask: Task<Void, Never>?
     @State private var showPermissionNotice = false
     @State private var permissionToolName: String?
+    @State private var showTurnDoneNotice = false
+    @State private var turnDoneProject: String?
+    @State private var turnDoneSummary: String?
 
     private let animationSpring = Animation.interactiveSpring(response: 0.38, dampingFraction: 0.8, blendDuration: 0)
     private let startupGlowColor = Color(red: 0.55, green: 0.8, blue: 0.9)
@@ -93,7 +96,9 @@ struct NotchContentView: View {
                             topCornerRadius: topCornerRadius,
                             bottomCornerRadius: bottomCornerRadius,
                             glowColor: awaitingGlowColor,
-                            brightColor: awaitingBrightColor
+                            brightColor: awaitingBrightColor,
+                            lineWidth: 4.5,
+                            glowStrength: 1.6
                         )
                     } else if claudeCodeManager.hasAnySessionActivity, notchVM.notchState == .closed {
                         NotchGlowBorder(
@@ -102,6 +107,16 @@ struct NotchContentView: View {
                             glowColor: activityGlowColor,
                             brightColor: activityBrightColor
                         )
+                    }
+                }
+                .onChange(of: claudeCodeManager.sessionsAwaitingUser.count) { oldCount, newCount in
+                    // Only on the way up. Sessions finishing one after another
+                    // each deserve a notice; the count falling is a session
+                    // resuming, which is not news.
+                    if newCount > oldCount {
+                        triggerTurnDoneNotice()
+                    } else if newCount == 0 {
+                        showTurnDoneNotice = false
                     }
                 }
                 .onChange(of: claudeCodeManager.sessionsNeedingPermission.count) { oldCount, newCount in
@@ -525,6 +540,15 @@ struct NotchContentView: View {
         )
     }
 
+    private var turnDoneContent: some View {
+        TurnDoneNotice(project: turnDoneProject, summary: turnDoneSummary)
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .onTapGesture {
+                notchVM.open()
+            }
+    }
+
     private var peekHeader: some View {
         HStack(spacing: 10) {
             Circle()
@@ -543,6 +567,8 @@ struct NotchContentView: View {
     private var peekContent: some View {
         if showPermissionNotice {
             permissionContent
+        } else if showTurnDoneNotice {
+            turnDoneContent
         } else {
             VStack(spacing: 8) {
                 if settings.showNotchTokenCount, recentTokenTotal > 0 {
@@ -1010,6 +1036,24 @@ struct NotchContentView: View {
                 }
             }
         }
+    }
+
+    /// Announce that a session handed control back, and say what it was doing.
+    ///
+    /// The glow alone answers "something wants you" but not "which, and about
+    /// what" — and with several sessions open that is most of the question. The
+    /// notice is deliberately brief: it names the project and the agent's own
+    /// closing line, then gets out of the way. Anything longer belongs in the
+    /// panel, which is one click below it.
+    private func triggerTurnDoneNotice() {
+        let session = claudeCodeManager.sessionsAwaitingUser.first
+        let state = session.flatMap { claudeCodeManager.sessionStates[$0.id] }
+        turnDoneProject = session?.displayName
+        turnDoneSummary = state?.lastAssistantSummary
+
+        showPermissionNotice = false
+        showTurnDoneNotice = true
+        notchVM.peek(duration: 4.0)
     }
 
     private func triggerPermissionNotice() {

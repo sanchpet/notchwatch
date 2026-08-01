@@ -70,6 +70,16 @@ final class ClaudeCodeManager: ObservableObject {
     /// instant and reports a duration of zero — and even live, the pair of lines
     /// for a fast tool usually lands in a single read. What that measured was
     /// when Notchwatch noticed, not when anything took place.
+    /// First non-empty line of `text`, trimmed to something a notice can hold.
+    private static func firstLine(of text: String) -> String? {
+        let line = text
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let line, !line.isEmpty else { return nil }
+        return line.count > 120 ? String(line.prefix(119)) + "…" : line
+    }
+
     private static func entryDate(_ json: [String: Any]) -> Date {
         guard let raw = json["timestamp"] as? String else { return Date() }
         for parser in entryTimestampParsers {
@@ -888,6 +898,9 @@ final class ClaudeCodeManager: ObservableObject {
             case "text":
                 if sessionState.activeTools.isEmpty, !sessionState.recentTools.isEmpty {
                     sessionState.isThinking = false
+                }
+                if let text = item["text"] as? String, !text.isEmpty {
+                    sessionState.lastAssistantSummary = Self.firstLine(of: text)
                 }
                 if let text = item["text"] as? String, text.contains("[Request interrupted by user") {
                     sessionState.isThinking = false

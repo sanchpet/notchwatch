@@ -268,6 +268,14 @@ struct ClaudeCodeState: Equatable {
     /// The tool waiting for permission (if any)
     var pendingPermissionTool: String?
 
+    /// Opening line of the agent's closing message, for the hand-back notice.
+    ///
+    /// "The turn is yours" is more use with a sentence of what was just done
+    /// than without one, and the transcript already carries it: the assistant's
+    /// last text block is that report. Only the first line is kept — a notice
+    /// that has to be read rather than glanced at defeats itself.
+    var lastAssistantSummary: String?
+
     /// True when Claude is actively generating a response (thinking)
     var isThinking: Bool = false
 
