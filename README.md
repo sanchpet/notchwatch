@@ -1,129 +1,111 @@
+# Notchwatch
 
-<h1 align="center">AgentNotch</h1>
+Claude Code session state in the notch of your Mac.
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/AppGram/agentnotch/main/agentnotch-demo.png" alt="AgentNotch Icon">
-</p>
+Notchwatch is a menu-bar/notch companion for [Claude Code](https://claude.com/claude-code). It sits in the notch (or the menu bar on Macs without one) and shows what the agent is doing right now: the tool it is running, whether it is thinking, whether it is waiting for a permission decision, the current todo list, elapsed time, git branch, token usage and how much of the context window is left.
 
-<p align="center">
-  <strong>Real-time AI coding assistant telemetry in your Mac's notch</strong>
-</p>
+It watches local files only. It is not a client for anything, it holds no credentials, and it makes no network requests — there is no `URLSession`, no `Network` import and no socket anywhere in `Sources/`, and the app ships with an empty entitlements file.
 
-<p align="center">
-  <a href="#features">Features</a> •
-  <a href="#installation">Installation</a> •
-  <a href="#usage">Usage</a> •
-  <a href="#requirements">Requirements</a>
-</p>
+## Scope
 
----
+Claude Code, and nothing else. Support for OpenAI Codex was removed on purpose — see [Origin](#origin) — because one well-understood data source beats two half-supported ones.
 
-## What is AgentNotch?
+## Where the data comes from
 
-AgentNotch is a sleek macOS menu bar app that lives in your Mac's notch, providing real-time visibility into your AI coding assistants. Watch as **Claude Code** and **OpenAI Codex** think, read files, and execute tools — all without leaving your editor.
+Two sources, and the app works with either one alone:
 
-## Features
+- **The transcript** (`~/.claude/projects/**/*.jsonl`), always. It is the only place token usage and the model id appear.
+- **Hooks**, optionally. Registering them in Settings makes tool starts, permission prompts and session boundaries arrive at the moment they happen instead of when the transcript is next flushed. Nothing is written to your Claude Code settings without pressing that button and confirming a dialog that names the file. See [docs/hooks.md](docs/hooks.md).
 
-### 🎯 **Real-Time Tool Tracking**
-See every tool call as it happens — file reads, code edits, shell commands, and more. Know exactly what your AI assistant is doing at any moment.
+## Install
 
-### 📊 **Token & Cost Monitoring**
-Track token usage (input/output) and estimated costs in real-time. Never be surprised by API bills again.
+Builds are published as a `.dmg` on the [Releases](https://github.com/sanchpet/agentnotch/releases) page; drag the app to `/Applications`.
 
-### 🎨 **Source-Aware Design**
-- **Orange** indicator for Claude Code
-- **Blue** indicator for Codex
-- **Light blue** for unknown sources
+No release has been published yet — the current version is `0.0.0`. Until the first one lands, build it yourself: see [Development](#development), it takes about a minute.
 
-Visual distinction lets you know which AI is active at a glance.
-
-### 🔔 **Completion Detection**
-Get notified when your AI assistant finishes a task. No more wondering "is it still thinking?"
-
-### ⚡ **Lightweight & Native**
-- Lives in your Mac's notch — zero screen real estate used
-- Native macOS app — fast, efficient, battery-friendly
-- Expands on hover to show details
-
-### ⚙️ **Configurable**
-- Show/hide token counts
-- Show/hide cost estimates
-- Filter by source (Claude/Codex)
-- Toggle menu bar icon
-
-## Installation
-
-### Homebrew (Recommended)
-
-```bash
-brew tap AppGram/tap
-brew install --cask agentnotch
-```
-
-### Manual Download
-
-1. Download `AgentNotch-1.0.0.zip` from [Releases](https://github.com/AppGram/agentnotch/releases)
-2. Unzip and drag `AgentNotch.app` to `/Applications`
-3. Open AgentNotch
-
-## Usage
-
-### Setup with Claude Code
-
-Add to your Claude Code configuration to send telemetry:
-
-```bash
-# Set OTEL endpoint to AgentNotch (default port 4318)
-export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"
-```
-
-### Setup with Codex
-
-AgentNotch listens for **OTLP/HTTP** on port **4318** by default, and currently decodes **OTLP logs** (`/v1/logs`) and **metrics** (`/v1/metrics`).
-
-Codex CLI (v0.79+) uses `~/.codex/config.toml` with an `[otel]` section (not `[telemetry]`). Add:
-
-```toml
-[analytics]
-enabled = true
-
-[otel]
-# AgentNotch currently does not decode OTLP traces, so disable trace export to avoid noisy errors.
-trace_exporter = "none"
-
-[otel.exporter.otlp-http]
-endpoint = "http://localhost:4318/v1/logs"
-protocol = "binary"
-```
-
-### Using the App
-
-1. **Launch** — AgentNotch appears in your notch (or menu bar on non-notch Macs)
-2. **Hover** — Expand to see recent tool calls with details
-3. **Click** — Open full view with token breakdown and settings
-4. **Settings** — Configure display options via the gear icon
-
-## Screenshots
-
-| Collapsed | Expanded |
-|-----------|----------|
-| Minimal notch indicator | Full tool call history |
+There is no Homebrew cask. A cask installs with quarantine set, so it is only worth having once builds are signed — see [Signing](#signing-and-notarization).
 
 ## Requirements
 
-- macOS 14.0 (Sonoma) or later
-- Mac with notch (MacBook Pro 14"/16" 2021+) or any Mac (falls back to menu bar)
+- macOS 14.0 (Sonoma) or later.
+- Claude Code, with its transcripts in the default location (`~/.claude/projects/`).
+- A Mac with a notch gets the notch UI; every other Mac falls back to the menu bar.
 
-## Privacy
+## Signing and notarization
 
-AgentNotch runs **100% locally**. No data is sent anywhere — it only receives telemetry from your local AI tools.
+Releases are built by CI in one of two modes, decided by whether an Apple Developer ID certificate is available to the workflow:
+
+- **Signed and notarized.** The app is signed with a Developer ID under the hardened runtime, notarized by Apple and stapled; the DMG is signed and stapled too. It opens on double-click and Gatekeeper stays quiet.
+- **Unsigned.** The app carries an ad-hoc signature only. The artifact name ends in `-unsigned` and the release notes say so.
+
+An unsigned build downloaded from the internet is quarantined, and macOS will not let it through on the first attempt. Depending on the build you will see *"Apple could not verify "Notchwatch" is free of malware"* or *""Notchwatch" is damaged and can't be opened"*. The old workaround — right-click → **Open** — no longer clears this on macOS 15 (Sequoia) and later; that path was removed.
+
+To open it anyway:
+
+1. Double-click the app once and dismiss the warning.
+2. Open **System Settings → Privacy & Security**, scroll to the Security section, and press **Open Anyway** next to the message naming the app.
+3. Confirm, and authenticate.
+
+Or clear the quarantine attribute from a terminal, which does the same thing without the round trip:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Notchwatch.app
+```
+
+Do this only if you trust the source of the build. If you would rather not, build it yourself.
+
+## Origin
+
+This is a fork of [AppGram/agentnotch](https://github.com/AppGram/agentnotch).
+
+Upstream ships no licence file; its README declares `MIT License — see [LICENSE](LICENSE) for details.` and the link points at a file that is not in the repository. The inherited code is MIT on the strength of that declaration, and [LICENSE](LICENSE) says so in exactly those terms rather than pretending to reproduce a file that never existed. The fork's own work is BSD 3-Clause. Two vendored files keep their own licences: `CGSSpace.swift` is MPL-2.0 (from Parrot) and `NotchShape.swift` is MIT under a separate copyright (from DynamicNotchKit).
+
+Removed:
+
+- **The claude.ai credential path.** Upstream asked the user for a claude.ai `sessionKey`, stored it (together with a Cloudflare `cf_clearance` clearance cookie) in the Keychain, and used them to call `https://claude.ai/api/organizations/...` while impersonating a browser — a spoofed Chrome `user-agent`, `origin: https://claude.ai`, `anthropic-client-platform: web_claude_ai`, `sec-fetch-site: same-origin`. That is a session-hijacking shape: it is not a public API, the credential is the user's whole web session, and shipping it under a signature is not defensible. The entire path is gone, along with the Keychain helper that existed to serve it.
+- **OpenAI Codex support**, and the OTLP receiver it needed — an HTTP server listening on port 4318 by default to decode protobuf metrics, plus the two package dependencies behind it (`opentelemetry-swift` and `swift-protobuf`) and their transitive graph. The app now has no external dependencies at all.
+- **The MCP process manager and JSON-RPC cluster** (2,504 lines across 17 files), the Xcode-build UI it fed, and the `AppMode` switch that selected between it and the Claude Code UI. Upstream kept both halves of the app alive behind a constant; only one half was ever reachable.
+- **The bundled "meme video".** A setting shipped with a hardcoded `googlevideo.com` playback URL as its default and fed it straight to `AVPlayer`. The URL embedded a third party's residential IPv6 address and signed playback tokens, and it was the only reason the app ever touched the network. The setting, the URL, the toggle and the player are gone.
+
+Changed:
+
+- Renamed, with a new bundle identifier. The upstream name belongs to someone else, upstream already advertises a Homebrew cask under it (`brew tap AppGram/tap`), and its two bundle ids contradicted each other — the Xcode project said `com.nedimfakic.AgentNotch` while `Info.plist` said `com.appgram.agentnotch`.
+- Built by SwiftPM. The Xcode project is gone; `swift build` plus `scripts/build-app.sh` is the only description of how the app is assembled, and CI runs that same script.
+- Tool lists are folded from every live session instead of a single `selectedSession` that upstream only ever assigned when exactly one session existed — so with an editor holding an IDE lock next to a terminal session, the normal case, the published state stayed default-constructed and the tool list was permanently empty.
+- The context bar has one definition of context: `input + cache_read + cache_creation` tokens against a window derived from the model in use (including the `[1m]` long-context variants), and floored by the largest prompt the session has actually sent, instead of a hardcoded 200k that had to be corrected by hand in settings.
+- The git branch badge is resolved from the session's working directory by reading `.git/HEAD`, not taken from a field in the transcript that reported the literal string `HEAD` on detached checkouts.
+- Notch geometry is read from the display's own `auxiliaryTopLeftArea`/`auxiliaryTopRightArea` and recomputed when the display configuration changes, rather than measured once at launch.
+- Hook support (above) is new; upstream had none.
+
+## Development
+
+No full Xcode is needed; Command Line Tools are enough.
+
+```bash
+swift build                 # debug build
+swift build -c release      # release build
+scripts/build-app.sh        # assemble Notchwatch.app from the release binary
+```
+
+Tooling is installed with [mise](https://mise.jdx.dev):
+
+```bash
+mise install                # SwiftLint and friends, pinned in mise.toml
+mise run lint               # swiftlint --strict + swiftformat --lint, what CI runs
+mise run bundle             # the same as scripts/build-app.sh
+```
+
+Hooks:
+
+```bash
+pre-commit install          # once per clone
+pre-commit run --all-files  # what CI checks, run everything
+```
+
+Run the linter over the whole tree before pushing — CI lints the whole repository, while the commit hook only sees changed files.
+
+Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-<p align="center">
-  Made with ❤️ for developers who love AI coding assistants
-</p>
+BSD 3-Clause for this fork's work, MIT for the code inherited from AgentNotch, plus two vendored files under their own terms. Full text and attribution in [LICENSE](LICENSE).

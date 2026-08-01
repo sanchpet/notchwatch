@@ -1,0 +1,130 @@
+Notchwatch is covered by three licences. Which one applies depends on where the
+code came from:
+
+  1. BSD 3-Clause  — the work of this fork.
+  2. MIT           — code inherited from AgentNotch, the project this is a fork of.
+  3. MPL-2.0       — Sources/Notchwatch/Window/CGSSpace.swift, vendored from Parrot.
+
+The MIT text in section 2 also covers Sources/Notchwatch/Views/Notch/NotchShape.swift,
+vendored from DynamicNotchKit under its own copyright — see section 4.
+
+Sections 2, 3 and 4 apply in addition to section 1, never instead of it.
+
+
+================================================================================
+1. BSD 3-Clause License — the work of this fork
+================================================================================
+
+Copyright (c) 2026, sanchpet
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+================================================================================
+2. MIT License — code inherited from AgentNotch
+================================================================================
+
+Notchwatch is a fork of AgentNotch (https://github.com/AppGram/agentnotch).
+Parts of this software are derived from it, and those parts remain under the
+MIT License, held by the AgentNotch authors.
+
+How that grant was made, stated exactly:
+
+  The upstream repository contains no licence file. Its README declares the
+  licence in a single line, quoted here verbatim:
+
+      MIT License — see [LICENSE](LICENSE) for details.
+
+  The file that line links to does not exist in the upstream repository; the
+  declaration is the whole of the grant. What follows is therefore not a copy of
+  an upstream file — it is the standard text of the licence that declaration
+  names, set out here so that a recipient of Notchwatch has the terms in hand.
+
+Copyright holders: the authors of AgentNotch. They are not named in the upstream
+repository beyond its commit history, so no individual is named here either. Two
+partial enumerations exist, and they do not agree. GitHub credits four accounts —
+@nedimf, @serrrfirat, @0x8205 and @FlorianZimmer. The inherited commit history
+(19 commits, 2026-01-07 to 2026-01-19; run `git log 4139d6f`) carries a fifth
+author, james <james@bonkbot.io>, whose address is linked to no account and who
+therefore appears in neither list above. The holders are the authors, whoever
+they turn out to be; these lists are evidence about them, not a definition of
+them.
+
+MIT License
+
+Copyright (c) 2026 the AgentNotch authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+3. MPL-2.0 — one file, which cannot be relicensed
+================================================================================
+
+  Sources/Notchwatch/Window/CGSSpace.swift
+
+It is vendored from Parrot (https://github.com/avaidyam/Parrot, the file
+MochaUI/CGSSpace.swift) and stays governed by the Mozilla Public License,
+Version 2.0.
+
+MPL-2.0 is file-level copyleft: the file may live inside a project under another
+licence, but the file itself — and any modification to it — must stay available
+under MPL-2.0. If a copy of the MPL was not distributed with this file, you can
+obtain one at https://mozilla.org/MPL/2.0/.
+
+
+================================================================================
+4. DynamicNotchKit — MIT, separate copyright
+================================================================================
+
+  Sources/Notchwatch/Views/Notch/NotchShape.swift
+
+It is vendored from DynamicNotchKit (https://github.com/MrKai77/DynamicNotchKit),
+which is MIT-licensed. MIT requires its copyright notice to travel with the code,
+and DynamicNotchKit's notice reads:
+
+  Copyright (c) 2025 Kai Azim
+
+The permission notice and warranty disclaimer that go with it are the MIT text
+reproduced in section 2 above; they apply to this file under the copyright named
+here rather than the one named there.
