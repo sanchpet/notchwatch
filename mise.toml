@@ -69,4 +69,4 @@ description = "Everything CI runs"
 # release build can succeed while build-app.sh fails on the Info.plist template
 # or a missing resource. Leaving it out let a contributor get a green local run
 # and still break CI at the step after the one they checked.
-depends = ["lint", "lint:repo", "build:release", "bundle"]
+depends = ["lint", "lint:repo", "test", "build:release", "bundle"]

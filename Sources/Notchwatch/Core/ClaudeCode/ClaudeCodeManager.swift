@@ -8,6 +8,7 @@
 import AppKit
 import Combine
 import Foundation
+import NotchwatchKit
 
 // MARK: - Debug Logging (disabled in Release builds)
 
@@ -228,6 +229,17 @@ final class ClaudeCodeManager: ObservableObject {
         var seen = Set<String>()
         return roots.filter { seen.insert($0.standardizedFileURL.path).inserted }
     }()
+
+    /// The configuration root a session's transcript lives under — `~/.claude`,
+    /// `~/.claude-personal`, whichever. A transcript sits at
+    /// `<root>/projects/<project>/<id>.jsonl`, so the root is two levels up.
+    private func configRoot(forSessionKey key: String) -> URL? {
+        guard let transcript = watched[key]?.transcript else { return nil }
+        return transcript
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
 
     private var ideDirs: [URL] {
         claudeRoots.map { $0.appendingPathComponent("ide") }
@@ -738,7 +750,10 @@ final class ClaudeCodeManager: ObservableObject {
             sessionStates[sessionKey]?.cwd = cwd
             // The pin is per-project as well as per-user, so it can only be read
             // once the session's directory is known.
-            if ClaudeModelPin.declaresLongWindow(projectDirectory: cwd) {
+            if ClaudeModelPin.declaresLongWindow(
+                projectDirectory: cwd,
+                configRoot: configRoot(forSessionKey: sessionKey)
+            ) {
                 contextTrackers[sessionKey, default: ClaudeContextTracker()].noteLongWindowOptIn()
             }
         }
@@ -841,29 +856,23 @@ final class ClaudeCodeManager: ObservableObject {
         sessionKey: String,
         at entryDate: Date
     ) {
-        // Order matters here, and used to be wrong in a way that cost the app its
-        // most valuable state. `stop_reason` was read first and the role checked
-        // second — but the assistant message carrying `end_turn` *is* an
-        // assistant message, so the role branch immediately set thinking back to
-        // true and cleared the reason it had just recorded. `isSessionComplete`
-        // could therefore never be true from a transcript, and the notch went
-        // quiet at the exact moment the turn ended and the user's attention was
-        // wanted.
+        // Turn boundaries live in NotchwatchKit, tested there. They were once
+        // inline here and wrong in a way no one could see: the assistant message
+        // carrying `end_turn` had its stop reason cleared by the role branch one
+        // line after it was recorded, so a session could never be observed to
+        // finish. Pure logic in a place a test can reach is the fix for that
+        // class of defect, not a more careful reading of the same lines.
         let role = message["role"] as? String
-        let stopReason = message["stop_reason"] as? String
-
-        if role == "user" {
-            // A new prompt opens a turn: whatever ended the last one is spent.
-            sessionState.isThinking = true
-            sessionState.lastStopReason = nil
-        } else if role == "assistant" {
-            sessionState.lastStopReason = stopReason
-            // `tool_use` means the turn continues through a tool; only
-            // `end_turn` hands control back.
-            sessionState.isThinking = stopReason != "end_turn"
-        } else if let stopReason {
-            sessionState.lastStopReason = stopReason
-        }
+        let turn = TurnBoundary.apply(
+            role: role,
+            stopReason: message["stop_reason"] as? String,
+            to: TurnBoundary.State(
+                isThinking: sessionState.isThinking,
+                lastStopReason: sessionState.lastStopReason
+            )
+        )
+        sessionState.isThinking = turn.isThinking
+        sessionState.lastStopReason = turn.lastStopReason
 
         guard let content = message["content"] as? [[String: Any]] else { return }
 

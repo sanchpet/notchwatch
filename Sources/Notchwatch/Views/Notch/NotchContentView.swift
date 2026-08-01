@@ -78,23 +78,29 @@ struct NotchContentView: View {
                             glowColor: startupGlowColor,
                             brightColor: startupBrightColor
                         )
+                    } else if !claudeCodeManager.sessionsAwaitingUser.isEmpty, notchVM.notchState == .closed {
+                        // Ahead of the activity glow, not behind it. Busy is the
+                        // background state — with several sessions open one of
+                        // them almost always is — so ranking it first meant the
+                        // orange permanently masked the one signal the user has
+                        // to see. Needing the user is the exception, and the
+                        // exception wins.
+                        //
+                        // Persistent rather than a flash: a signal that has to
+                        // be caught in the second it fires is a signal that gets
+                        // missed. It clears when the session picks work back up.
+                        NotchGlowBorder(
+                            topCornerRadius: topCornerRadius,
+                            bottomCornerRadius: bottomCornerRadius,
+                            glowColor: awaitingGlowColor,
+                            brightColor: awaitingBrightColor
+                        )
                     } else if claudeCodeManager.hasAnySessionActivity, notchVM.notchState == .closed {
                         NotchGlowBorder(
                             topCornerRadius: topCornerRadius,
                             bottomCornerRadius: bottomCornerRadius,
                             glowColor: activityGlowColor,
                             brightColor: activityBrightColor
-                        )
-                    } else if !claudeCodeManager.sessionsAwaitingUser.isEmpty, notchVM.notchState == .closed {
-                        // Deliberately persistent, not a flash: a signal that
-                        // has to be caught in the second it fires is a signal
-                        // that will be missed. It clears when the session picks
-                        // work back up, which is the moment it stops being true.
-                        NotchGlowBorder(
-                            topCornerRadius: topCornerRadius,
-                            bottomCornerRadius: bottomCornerRadius,
-                            glowColor: awaitingGlowColor,
-                            brightColor: awaitingBrightColor
                         )
                     }
                 }
@@ -450,6 +456,18 @@ struct NotchContentView: View {
             WorkflowProgressRow(progress: workflow)
         }
 
+        // One row per session, so that "which session is this?" has an answer,
+        // and above the tool blocks rather than below them: with several
+        // sessions running this is what the panel is opened for, and burying it
+        // under a variable-height block meant scrolling to reach it. Only worth
+        // the room when there is something to tell apart — with a single session
+        // the footer and the bar already describe it.
+        if claudeCodeManager.availableSessions.count > 1 {
+            NotchSection(title: "Sessions") {
+                SessionListView(manager: claudeCodeManager, settings: settings)
+            }
+        }
+
         if settings.toolDisplayMode == "singular" {
             // Singular mode: show one detailed event
             if let currentTool = claudeTools.first {
@@ -461,15 +479,6 @@ struct NotchContentView: View {
             // List mode: show recent events list
             NotchSection(title: "Recent Tools") {
                 ClaudeToolListView(tools: claudeTools, maxItems: 4)
-            }
-        }
-
-        // One row per session, so that "which session is this?" has an answer.
-        // Only worth the room when there is something to tell apart: with a
-        // single session the footer and the bar below already describe it.
-        if claudeCodeManager.availableSessions.count > 1 {
-            NotchSection(title: "Sessions") {
-                SessionListView(manager: claudeCodeManager, settings: settings)
             }
         }
     }

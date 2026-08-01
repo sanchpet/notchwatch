@@ -53,6 +53,9 @@ jobs:
 
       # xcbeautify's github-actions renderer turns compiler diagnostics into
       # inline annotations. pipefail keeps the compiler's exit code authoritative.
+      - name: Test
+        run: mise run test
+
       - name: Build (release)
         run: |
           set -o pipefail

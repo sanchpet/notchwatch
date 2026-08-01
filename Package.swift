@@ -14,9 +14,28 @@ let package = Package(
     products: [
         .executable(name: "Notchwatch", targets: ["Notchwatch"]),
     ],
+    // Test-only. The product itself still resolves to nothing external: this is
+    // never linked into the app. Neither XCTest nor Testing ships with the
+    // Command Line Tools, and a test that cannot run on the machine that writes
+    // it is a test that does not get written.
+    dependencies: [
+        .package(url: "https://github.com/swiftlang/swift-testing.git", from: "0.10.0"),
+    ],
     targets: [
+        // Pure logic, kept apart from the app so it can be tested without a
+        // screen: the app target is an executable with @main and a great deal of
+        // AppKit, none of which a unit test can or should stand up.
+        .target(name: "NotchwatchKit"),
+        .testTarget(
+            name: "NotchwatchKitTests",
+            dependencies: [
+                "NotchwatchKit",
+                .product(name: "Testing", package: "swift-testing"),
+            ]
+        ),
         .executableTarget(
             name: "Notchwatch",
+            dependencies: ["NotchwatchKit"],
             // Assets.xcassets needs actool, which ships with Xcode.app and not
             // with the Command Line Tools; it is kept as the source material for
             // regenerating Resources/AppIcon.icns, not as a build input.
