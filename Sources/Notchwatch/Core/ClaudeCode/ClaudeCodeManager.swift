@@ -673,6 +673,27 @@ final class ClaudeCodeManager: ObservableObject {
         var sessionState = ClaudeCodeState()
         sessionState.sessionId = session.terminalSessionId ?? session.id
         sessionState.cwd = TranscriptTail.firstValue(forKey: "cwd", in: transcript) ?? ""
+        // Read the 1M opt-in here, where the directory becomes known.
+        //
+        // It used to be read only on the transition "cwd was empty and now is
+        // not", which this line makes unreachable: attach learns the directory
+        // from the head of the file before a single entry is parsed, so the
+        // transition never happens and the pin was never consulted at all.
+        // Sessions still came out at 1M once they had sent a prompt too large
+        // for 200k to have held — the evidence floor covering for a reading that
+        // was not happening — which is why this looked correct on a long session
+        // and wrong on every fresh one.
+        if !sessionState.cwd.isEmpty,
+           ClaudeModelPin.declaresLongWindow(
+               projectDirectory: sessionState.cwd,
+               configRoot: transcript
+                   .deletingLastPathComponent()
+                   .deletingLastPathComponent()
+                   .deletingLastPathComponent()
+           ) {
+            contextTrackers[session.id, default: ClaudeContextTracker()].noteLongWindowOptIn()
+            sessionState.declaresLongContextWindow = true
+        }
         sessionState.isConnected = true
         sessionState.lastUpdateTime = Date()
         sessionStates[session.id] = sessionState
