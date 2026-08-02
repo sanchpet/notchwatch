@@ -334,7 +334,9 @@ Fully automated; nothing is built or tagged by hand. release-please (`release-ty
 
 Everything publishes to **this** repository's Releases — `sanchpet/notchwatch`. Nothing is pushed upstream, and there is no Homebrew tap or cask: a cask installs with quarantine set, so it only becomes worth having once builds are signed. Do not add one before then.
 
-Signing is optional: without the five Developer ID secrets the pipeline still produces an image, named `<Product>-<version>-unsigned.dmg`, and prepends an "Unsigned build" note to the release body. Nothing has been released yet — `version.txt` and the manifest are both at `0.0.0`.
+Signing is optional: without the five Developer ID secrets the pipeline still produces an image, named `<Product>-<version>-unsigned.dmg`, and prepends an "Unsigned build" note to the release body.
+
+The version line starts at **0.1.0** and stays below 1.0 until the app has earned it: `bump-minor-pre-major` keeps every subsequent `feat` in the `0.x` range, so the number reports the state of the product rather than flattering it. The inherited `v1.1.x` tags were deleted from this repository's remote — they were cut upstream, against a different product name and a different bundle id, and left the Releases page with a "latest" that disagreed with the highest number. Upstream keeps its own.
 
 Step order in the publish step is a safety property, not a preference: **the note goes into the release body before the asset is uploaded, and the asset is uploaded last.** Uploading first leaves an unsigned, unmarked disk image publicly downloadable for as long as the edit takes — and forever if the edit fails, since the step runs under `set -e`. When the job creates the release itself (a hand-dispatched tag), it creates a draft and flips it to published as the final act; a release that release-please already published cannot be un-published, which is why the ordering has to hold on its own. The banner is guarded by an HTML-comment marker so a re-run does not stack it.
 
