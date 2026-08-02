@@ -40,6 +40,16 @@ struct MenuBarContentView: View {
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
                             .lineLimit(1)
+
+                        // What is actually running, as opposed to what was last
+                        // built: `open` reactivates an existing instance, so a
+                        // rebuilt bundle can sit on disk while the old process
+                        // keeps going. Compare with `--version`.
+                        Text(BuildInfo.stamp.short)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.secondary.opacity(0.7))
+                            .lineLimit(1)
+                            .textSelection(.enabled)
                     }
 
                     Spacer()

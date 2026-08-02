@@ -10,7 +10,7 @@ It is a fork of `AppGram/agentnotch`, narrowed on purpose. Removed from upstream
 ## Build System
 SwiftPM, not Xcode: `Package.swift` declares one executable target and no dependencies, so the whole project builds with `swift build` under the Command Line Tools. There is no `.xcodeproj` — Xcode, when present, opens `Package.swift` directly.
 
-SwiftPM cannot emit a `.app`, so `scripts/build-app.sh` assembles the bundle around the executable: `Resources/Info.plist.in` is the Info.plist template and `scripts/product.env` holds the product name, bundle id, minimum OS and copyright. Both CI and the release pipeline run that same script. Task entry points are in `mise.toml`: `build`, `build:release`, `lint` (= `lint:swift` + `lint:format`), `lint:repo`, `fmt`, `bundle`, `dmg`, `ci`. `mise run test` runs the `NotchwatchKit` suite (swift-testing, a test-only dependency — neither XCTest nor Testing ships with the Command Line Tools).
+SwiftPM cannot emit a `.app`, so `scripts/build-app.sh` assembles the bundle around the executable: `Resources/Info.plist.in` is the Info.plist template and `scripts/product.env` holds the product name, bundle id, minimum OS and copyright. Both CI and the release pipeline run that same script. Task entry points are in `mise.toml`: `build`, `build:release`, `lint` (= `lint:swift` + `lint:format`), `lint:repo`, `fmt`, `bundle`, `relaunch`, `dmg`, `ci`. Use `relaunch` — never a bare `open build/Notchwatch.app` — to see a change running; see Panel Control below for why. `mise run test` runs the `NotchwatchKit` suite (swift-testing, a test-only dependency — neither XCTest nor Testing ships with the Command Line Tools).
 
 Lint has one policy, not two: the pre-commit hook and the CI lint job both run `mise run lint` over the **whole tree**, check-only. The hook does not rewrite files — `mise run fmt` does. `lint:repo` is the non-Swift half (shellcheck, gitleaks, YAML/JSON) and runs `pre-commit run --all-files`; it must never become a dependency of `lint`, because pre-commit calls `mise run lint` and the two would recurse.
 
@@ -46,21 +46,21 @@ Sources/Notchwatch/
 ├── Core/
 │   ├── ClaudeCode/
 │   │   ├── ClaudeCodeManager.swift    # Session discovery, transcript + hook parsing, folded state
-│   │   ├── ClaudeContextTracker.swift # Which usage entry counts as the context reading
-│   │   ├── ClaudeModelPin.swift       # `model` key of the settings files (1M opt-in)
+│   │   ├── ClaudeModelPin.swift       # Opens the settings files the kit's pin names
 │   │   ├── GitBranchResolver.swift    # Branch from the session cwd's .git/HEAD
 │   │   └── TranscriptTail.swift       # Incremental, line-boundary-safe transcript reads
 │   ├── Hooks/                         # Hook bridge: HookEvent, HookInstaller, HookRelay,
 │   │                                  #   HookSpool, HookSpoolWatcher (see docs/hooks.md)
 │   ├── Coordinators/
-│   │   └── UICoordinator.swift        # Notch panel + menu bar lifecycle, geometry updates
+│   │   └── UICoordinator.swift        # Notch panel + menu bar lifecycle, geometry, --panel routing
+│   ├── BuildInfo.swift                # What this process was built from, read at launch
+│   ├── PanelControl.swift             # --panel transport: post, repeat, acknowledge
 │   ├── PowerStateMonitor.swift        # Charging state, for the battery-saver frame rate
 │   └── Settings/
 │       └── AppSettings.swift          # @AppStorage settings
 ├── Models/
-│   ├── ClaudeCodeModels.swift         # ClaudeSession, ClaudeCodeState, ClaudeTokenUsage,
-│   │                                  #   ClaudeContextWindow
-│   ├── NotchGeometry.swift            # Cut-out geometry read back from the display
+│   ├── ClaudeCodeModels.swift         # ClaudeSession, ClaudeCodeState, ClaudeToolExecution
+│   ├── NotchGeometry+Screen.swift     # Asks NSScreen for the kit's four numbers
 │   ├── NotchSizing.swift              # Display-independent sizing constants
 │   └── NotchViewModel.swift           # NotchState (closed/open/peeking) + animations
 ├── Views/
@@ -81,7 +81,30 @@ Sources/Notchwatch/
 ├── NotchwatchAppDelegate.swift        # Accessory lifecycle, settings window
 ├── Assets.xcassets/                   # Icon source art; excluded from the target
 └── Resources/AppIcon.icns             # What build-app.sh copies into the bundle
+
+Sources/NotchwatchKit/                 # Pure logic, testable without a screen
+├── ClaudeConfigRoots.swift            # Which ~/.claude* directories are roots, in order
+├── ClaudeContextTracker.swift         # Which usage entry counts as the context reading
+├── ClaudeContextWindow.swift          # The bar's denominator (model, opt-in, evidence floor)
+├── ClaudeModelPin.swift               # Which settings files can carry the 1M opt-in, in order
+├── ClaudeTokenUsage.swift             # One request's tokens; promptTokens is the occupancy
+├── EditorLock.swift                   # What a lock file may claim: sessions, and a host
+├── NotchGeometry.swift                # Cut-out arithmetic: closed shape, panel, window frame
+├── PanelCommand.swift                 # What --panel means, and which delivery is a repeat
+├── ProjectKey.swift                   # Working directory <-> transcript directory name
+├── SessionStanding.swift              # What a session row says, and which row goes first
+├── TurnBoundary.swift                 # Where one turn ends and the next begins
+└── WorkspaceRef.swift                 # "<path>#<transcript id>": path, session id, label
 ```
+
+Anything in the kit is covered by `Tests/NotchwatchKitTests`, and the split is by
+what has broken rather than by taste: the context readout has shipped wrong three
+times (turnover mistaken for occupancy, a 1M window handed to every modern model,
+the pin read from the wrong profile) and path handling three more (only `~/.claude`
+read, a project collapsed into its newest transcript, a session credited to an
+editor that was not hosting it) — every failure a plausible reading in a plausible
+panel. The app must use the kit's types, never a copy — a test guarding code the
+product does not run is worse than no test.
 
 ## Two Data Sources
 The transcript is the **data plane** and hooks are the **control plane**; the app
@@ -96,14 +119,28 @@ reports them. Hook wiring, guarantees and the settings-file contract:
 ## Claude Code JSONL Integration
 
 ### File Locations
-- Claude directory: `~/.claude/`
-- IDE sessions: `~/.claude/ide/*.lock`
-- Project JSONL: `~/.claude/projects/{project-key}/{uuid}.jsonl`
+`<root>` is any configuration root, **not only `~/.claude`**: `CLAUDE_CONFIG_DIR`
+relocates the whole directory and `~/.claude-personal` / `~/.claude-work` is the
+documented way to run several profiles. The variable cannot be read from a
+Finder-launched app, so roots are discovered — `~/.claude` plus every `~/.claude-*`
+that holds a `projects` directory (`ClaudeConfigRoots`).
+- IDE sessions: `<root>/ide/*.lock`
+- Project JSONL: `<root>/projects/{project-key}/{uuid}.jsonl`
 - Stats cache: `~/.claude/stats-cache.json`
 - Hook spool: `~/Library/Application Support/{bundle-id}/hook-events/`
 
-### Project Key Format
-Path `/Users/foo/project` becomes `-Users-foo-project` (replace `/` with `-`)
+### Project Key Format (NotchwatchKit/ProjectKey.swift)
+Every **non-alphanumeric** character of the path becomes `-`, not just the
+separators: `/Users/foo/vault/.repos/app` is filed under
+`-Users-foo-vault--repos-app`. Escaping only `/` missed every dot-directory
+checkout. The mapping is many-to-one, so decoding a directory name is a guess —
+good enough to key a session on, and it round-trips back to the same directory,
+while the real working directory comes from the transcript's `cwd`.
+
+A session is keyed by `<path>#<transcript id>` (`WorkspaceRef`). An editor lock
+carries only the path, i.e. a **project**, and expands to one session per live
+transcript; its editor may be named as the host **only** when the project has
+exactly one live session, otherwise the host is `Unknown` (`EditorLock`).
 
 ### JSONL Message Types
 - `tool_use` - Tool execution started (has id, name, input)
@@ -185,7 +222,7 @@ There is deliberately no price readout. An honest one has to accumulate over
 every request of a session, and the app attaches to a transcript at a 2 MB tail —
 it never sees what came before.
 
-## Context Reading (ClaudeContextTracker.swift)
+## Context Reading (NotchwatchKit/ClaudeContextTracker.swift)
 The raw sequence of `usage` blocks is not monotonic, and three of the four causes
 are artefacts rather than a context that shrank. Measured over 44 local
 transcripts (26,750 usage-bearing lines, 11,362 distinct requests): repeated
@@ -196,15 +233,39 @@ real reset. With the first three filtered and the last honoured, the sequence is
 monotonic within every compaction segment, so the tracker takes the newest
 accepted request and refuses any other decrease.
 
-## Context Window (ClaudeContextWindow.resolve)
+## Context Window (NotchwatchKit/ClaudeContextWindow.resolve)
 Claude Code's 1M opt-in **never reaches `message.model`** — across the same 44
 transcripts that field is only ever a bare id. The suffix lives on the model
-*pin* (`~/.claude/settings.json` → `"model": "opus[1m]"`) and on
+*pin* (`settings.json` → `"model": "opus[1m]"`, read from the session's **own**
+config root and its project, not from `~/.claude` — see `ClaudeModelPin`) and on
 `toolUseResult.resolvedModel` of a `Task` result, and neither is complete, so the
 window is floored by the largest prompt the session actually sent: a window
 cannot be smaller than a prompt that fit in it.
 
 ## UI Components
+
+### Panel Geometry (NotchwatchKit/NotchGeometry.swift)
+The display is asked for four numbers — the screen frame, the two menu bar strips
+beside the cut-out (`auxiliaryTopLeftArea` / `auxiliaryTopRightArea`) and
+`safeAreaInsets.top` — and everything else is arithmetic over them. Asking is
+`Models/NotchGeometry+Screen.swift`, the only AppKit in the path; the arithmetic
+is in the kit, where it can be checked against displays no test machine has. Two
+rules are invariants, not preferences: the **closed shape is never wider than the
+cut-out** (the menu bar either side belongs to the system and exposes no reach,
+so exceeding it paints black over somebody else's pixels), and the **window is
+centred on the cut-out, not on the screen** (the two differ by a point or so, and
+the closed shape has to sit exactly over the cut-out to stay invisible). A gap of
+zero or less, or a menu bar of no height, means no cut-out: `resolve` returns nil
+and the app is the menu bar item alone.
+
+### Session Rows (NotchwatchKit/SessionStanding.swift)
+Each row is one of four standings, and the priority is load-bearing: permission
+outranks a finished turn (saying "your turn" would send the user to a session
+blocked on a prompt), a finished turn outranks activity. Rows sort by standing
+first and recency only within it, so whatever is asking for the user is at the
+top. The two that ask carry a word — "needs you", "your turn" — because four hues
+in a small row cannot be told apart, least of all by a reader who does not
+separate red from green. Only the palette lives in `SessionListView`.
 
 ### Notch States
 - `closed` - Minimal view with wings showing tool/thinking status
@@ -228,9 +289,38 @@ cannot be smaller than a prompt that fit in it.
 
 ## Panel Control and the Demo Fixture
 `--panel open|close|toggle|peek|demo-on|demo-off` talks to a running instance over
-a distributed notification (`PanelControl`). The sender turns its run loop briefly
-before exiting — the post goes to the system broker over XPC and is lost if the
-process dies first, which is how the first version failed silently.
+a distributed notification (`PanelControl`). Two properties of that centre shape
+the whole design, and both have already cost a silent failure:
+
+1. **A post with no observer registered is dropped, not queued.** There is no
+   store-and-forward for a subscriber that arrives a moment later. So the
+   observer is registered in `main()`, before AppKit — registration, not the run
+   loop, is the cut-off: a notification that lands with the observer in place but
+   the run loop not yet turning waits in the mach port. It used to be registered
+   in `NotchContentView.onAppear`, which meant `--panel` was dead for a fraction
+   of a second at every launch and **permanently on a display without a cut-out**,
+   where that view is never built at all. `NotchViewModel` is therefore owned by
+   `UICoordinator`, not by the view, and `UICoordinator.receive` is the one entry
+   point for every command.
+2. **The sender cannot know it was heard.** So it is told: each invocation carries
+   a nonce, repeats every 50 ms until the app acknowledges it, and exits non-zero
+   after 2 s of silence — the failure a script can see. The app answers `applied`
+   or `no-notch`, and a repeat that crossed its acknowledgement in flight is
+   answered again rather than acted on twice (`PanelDeliveryLedger`, in the kit,
+   with the parsing — `toggle` is the command that would otherwise undo itself).
+   The ordinary case got faster, not slower: the fixed 200 ms pause it replaced is
+   now a round trip of tens of milliseconds.
+
+`--version` prints the version, build number and modification time of the
+executable, captured at launch. The same stamp shows in the settings window and
+the menu bar popover, and the pair exists to answer one question: **is the app on
+screen the app that was just built?** `build-app.sh` removes the bundle before
+reassembling it, so a running instance keeps executing an unlinked inode, and
+`open` reactivates that process rather than launching the new binary. There is no
+build race to fix here — SwiftPM holds the `.build` lock across linking, so the
+"Another instance of SwiftPM is already running" line is correct serialisation
+rather than a symptom — the stale process is the whole of it. Kill it before
+`open`, never `open -n`: two instances would both answer `--panel`.
 
 Demo mode swaps every reading for `DemoScenario`'s fixture and **stops the
 watchers**, rather than letting them run and be ignored: a scan landing between a

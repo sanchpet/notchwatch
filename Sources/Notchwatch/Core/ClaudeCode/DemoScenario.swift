@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import NotchwatchKit
 
 /// A made-up set of sessions covering the states worth showing.
 ///
@@ -137,7 +138,7 @@ enum DemoScenario {
             let workspace = "/Users/demo/code/\(spec.project)"
             let session = ClaudeSession(
                 pid: 0,
-                workspaceFolders: ["\(workspace)#\(spec.id)"],
+                workspaceFolders: [WorkspaceRef(path: workspace, sessionID: spec.id).raw],
                 ideName: "Terminal",
                 transport: nil,
                 runningInWindows: nil

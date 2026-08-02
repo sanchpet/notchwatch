@@ -1,6 +1,6 @@
 //
 //  ClaudeContextTracker.swift
-//  Notchwatch
+//  NotchwatchKit
 //
 //  Folds a transcript's usage entries into one honest context reading.
 //
@@ -31,42 +31,51 @@ import Foundation
 /// resumed on a trimmed history (482,112 → 228,795 tokens). Holding the older,
 /// larger figure there errs high once in 11,362 requests, which is the cheaper
 /// error than flapping on every repeat.
-struct ClaudeContextTracker: Equatable {
+///
+/// The type is a pure fold on purpose: it is handed entries, never files. The
+/// reading it produces was wrong three times over — a running total mistaken for
+/// occupancy, then a window handed to every modern model, then a pin read from
+/// the wrong profile — and each was a plausible-looking number rather than a
+/// visible break, which is exactly the kind of defect a test catches and a glance
+/// does not.
+public struct ClaudeContextTracker: Equatable {
     /// Usage of the newest accepted request — one request, never a running total.
-    private(set) var usage = ClaudeTokenUsage()
+    public private(set) var usage = ClaudeTokenUsage()
 
     /// Largest prompt this session has been observed to send, across compactions.
     ///
     /// Evidence about the *window*, not about occupancy: a prompt that was
     /// accepted proves the window is at least that large, and that stays true
     /// after the context is compacted away.
-    private(set) var peakPromptTokens = 0
+    public private(set) var peakPromptTokens = 0
 
     /// True once a 1M-context opt-in has been seen, from the model pin, a `Task`
     /// result's `resolvedModel`, or the model id itself.
-    private(set) var declaresLongWindow = false
+    public private(set) var declaresLongWindow = false
 
     private var lastMessageID: String?
     private var isAfterCompaction = false
+
+    public init() {}
 
     // MARK: - Signals
 
     /// Record that a compaction boundary was read: the next request is allowed to
     /// report a smaller prompt than the last one.
-    mutating func noteCompactBoundary() {
+    public mutating func noteCompactBoundary() {
         isAfterCompaction = true
     }
 
     /// Record a model string from any source, adopting its 1M opt-in if it has
     /// one. Never clears the flag: an opt-in seen once holds for the session.
-    mutating func noteModelID(_ modelID: String) {
+    public mutating func noteModelID(_ modelID: String) {
         if ClaudeContextWindow.declaresLongWindow(modelID) {
             noteLongWindowOptIn()
         }
     }
 
     /// Record an opt-in established outside the transcript — the model pin.
-    mutating func noteLongWindowOptIn() {
+    public mutating func noteLongWindowOptIn() {
         declaresLongWindow = true
     }
 
@@ -76,7 +85,7 @@ struct ClaudeContextTracker: Equatable {
     ///
     /// - Returns: `true` when it was taken.
     @discardableResult
-    mutating func apply(_ candidate: ClaudeTokenUsage, messageID: String?) -> Bool {
+    public mutating func apply(_ candidate: ClaudeTokenUsage, messageID: String?) -> Bool {
         if let messageID, lastMessageID == messageID {
             return false
         }
@@ -95,23 +104,11 @@ struct ClaudeContextTracker: Equatable {
     }
 
     /// Window to measure `usage` against, given the session's model.
-    func window(model: String) -> Int {
+    public func window(model: String) -> Int {
         ClaudeContextWindow.resolve(
             model: model,
             longWindowOptIn: declaresLongWindow,
             observedPromptTokens: peakPromptTokens
-        )
-    }
-}
-
-extension ClaudeTokenUsage {
-    /// Read a `message.usage` object as written by Claude Code.
-    init(transcriptUsage: [String: Any]) {
-        self.init(
-            inputTokens: transcriptUsage["input_tokens"] as? Int ?? 0,
-            outputTokens: transcriptUsage["output_tokens"] as? Int ?? 0,
-            cacheReadInputTokens: transcriptUsage["cache_read_input_tokens"] as? Int ?? 0,
-            cacheCreationInputTokens: transcriptUsage["cache_creation_input_tokens"] as? Int ?? 0
         )
     }
 }

@@ -20,11 +20,29 @@ enum NotchwatchMain {
         if HookRelay.isRelayInvocation(CommandLine.arguments) {
             HookRelay.run()
         }
+
+        // Read before anything can replace the file underneath us, and before
+        // the branches below can consume it.
+        BuildInfo.capture()
+
+        if BuildInfo.isVersionInvocation(CommandLine.arguments) {
+            print(BuildInfo.stamp.full)
+            exit(0)
+        }
+
         // Same reasoning as the relay: a control invocation talks to whatever
         // instance is already running and must never become a second one.
         if PanelControl.isControlInvocation(CommandLine.arguments) {
             PanelControl.run(CommandLine.arguments)
         }
+
+        // Before AppKit, and that is the point: a command posted while nothing is
+        // listening is dropped, never queued, so the observer has to exist before
+        // anything can be sent at a process that has visibly started. What it
+        // still cannot cover — dyld and static initialisation — is why the sender
+        // repeats itself. See `PanelControl.startListening`.
+        PanelControl.startListening()
+
         NotchwatchApp.main()
     }
 }

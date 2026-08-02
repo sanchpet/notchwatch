@@ -110,7 +110,15 @@ The panel opens by clicking it, and by asking:
 Notchwatch --panel open|close|toggle|peek
 ```
 
-Deliberately not implemented with synthesised clicks. Doing that needs macOS Accessibility, which cannot be scoped to one application — it is the right to send input into any window on the machine. An app may show its own panel without any permission at all, so it is asked directly. The transport is a distributed notification: nothing is written, and with no instance running nothing happens.
+Deliberately not implemented with synthesised clicks. Doing that needs macOS Accessibility, which cannot be scoped to one application — it is the right to send input into any window on the machine. An app may show its own panel without any permission at all, so it is asked directly. The transport is a distributed notification, so nothing is written to disk.
+
+The command waits to be told it landed, and **exits non-zero if it never is** — no instance running, or one that cannot show a panel because no attached display has a cut-out. It repeats itself until then, which is what makes a command sent at an app that is still starting arrive rather than disappear. A running app answers in tens of milliseconds; the wait is only paid in full when nothing is listening (2 s). Scripts that call this on a machine where the app may be absent should tolerate the exit status.
+
+```sh
+Notchwatch --version    # version, build number and when this binary was built
+```
+
+`--version` describes the file on disk. The running app reports the same stamp in its settings window and menu bar popover, so the two can be compared: assembling the bundle deletes it first, and `open` reactivates an instance that is already running, so a rebuilt app on disk and an old one on screen look identical otherwise.
 
 ## Development
 

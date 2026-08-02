@@ -59,6 +59,26 @@ run = "swiftformat ."
 description = "Assemble (and ad-hoc sign) the .app bundle from the release build"
 run = "scripts/build-app.sh"
 
+[tasks.relaunch]
+description = "Rebuild the bundle and restart the running app from it"
+# `open` on its own reactivates the instance that is already running, and
+# build-app.sh deleted the bundle out from under it, so that process goes on
+# executing the old, now unlinked, binary — a fix that is on disk and not on
+# screen, with no visible difference between the two. Kill, then open. Never
+# `open -n`: two instances would both answer `--panel`.
+depends = ["bundle"]
+run = '''
+set -eu
+APP="${PWD}/build/Notchwatch.app"
+EXECUTABLE="${APP}/Contents/MacOS/Notchwatch"
+pkill -f "^${EXECUTABLE}$" || true
+while pgrep -f "^${EXECUTABLE}$" >/dev/null; do sleep 0.1; done
+open "${APP}"
+# What was just launched. The same stamp is in the app's settings window, so a
+# disagreement between the two is visible rather than inferred.
+"${EXECUTABLE}" --version
+'''
+
 [tasks.dmg]
 description = "Package the .app built by `bundle` into a distributable .dmg"
 run = "scripts/create-dmg.sh"

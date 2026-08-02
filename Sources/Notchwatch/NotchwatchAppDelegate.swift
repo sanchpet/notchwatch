@@ -7,9 +7,10 @@ final class NotchwatchAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        Task { @MainActor in
-            UICoordinator.shared.setupUI()
-        }
+        // Directly, not through a Task: this method already runs on the main
+        // actor, and the hop only delayed the moment the app could act on a
+        // `--panel` command that was already waiting in the port.
+        UICoordinator.shared.setupUI()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {

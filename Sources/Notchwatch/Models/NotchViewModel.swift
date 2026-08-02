@@ -2,6 +2,7 @@
 // View model for notch state and animations
 
 import Combine
+import NotchwatchKit
 import SwiftUI
 
 enum NotchState {
@@ -30,8 +31,9 @@ final class NotchViewModel: ObservableObject {
     private var peekTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
 
-    init() {
-        let coordinator = UICoordinator.shared
+    /// Built by the coordinator, which owns it: the panel's state has to outlive
+    /// the view, so that `--panel` is answerable whenever the process is up.
+    init(coordinator: UICoordinator) {
         let geometry = coordinator.geometry ?? .none
         self.geometry = geometry
         notchSize = geometry.closedSize
