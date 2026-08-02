@@ -104,6 +104,20 @@ struct GeneralSettingsTab: View {
             } header: {
                 Text("Context")
             }
+
+            // Which binary is actually running, as opposed to which one was
+            // last built. `scripts/build-app.sh` deletes the bundle before
+            // rebuilding it, and `open` reactivates the instance already up, so
+            // the two can differ for hours without a single visible symptom.
+            // Compare this against `Notchwatch --version`.
+            Section {
+                Text(BuildInfo.stamp.short)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .textSelection(.enabled)
+            } header: {
+                Text("This build")
+            }
         }
         .formStyle(.grouped)
         .padding()

@@ -6,21 +6,30 @@
 //
 
 import Foundation
+import NotchwatchKit
 
-/// Adds or removes this app's hook entries in `~/.claude/settings.json`.
+/// Adds or removes this app's hook entries in every Claude Code settings file.
 ///
-/// That file is the user's, not ours. Nothing here runs on launch or on a
-/// settings toggle: every call sits behind an explicit action, the previous
-/// contents are copied aside first, and `uninstall` removes exactly what
-/// `install` added — the file is left as it was found, minus our entries.
+/// **Every** file, not `~/.claude/settings.json`. Claude Code reads its user
+/// settings from the configuration root it is running under, so on a machine
+/// where `CLAUDE_CONFIG_DIR` points at `~/.claude-personal` — the documented way
+/// to keep profiles apart, and the app already watches all of them for sessions —
+/// hooks written to the default root are read by nobody. The failure is silent
+/// and total: the settings pane says registered, the file says registered, and
+/// not one event is ever raised.
 ///
-/// Unknown keys survive because the file is read as a dictionary and written
-/// back whole; only the hook arrays we own are touched.
+/// The file is the user's, not ours. Nothing here runs on launch or on a settings
+/// toggle: every call sits behind an explicit action, the previous contents are
+/// copied aside first, and `uninstall` removes exactly what `install` added.
+/// Unknown keys survive because the file is read as a dictionary and written back
+/// whole; what the edit itself amounts to is `HookSettings`, in the kit.
 @MainActor
 enum HookInstaller {
     enum InstallError: LocalizedError {
         case settingsUnreadable(URL)
         case settingsNotAnObject(URL)
+        case noSettingsFile
+        case partial([(URL, Error)])
 
         var errorDescription: String? {
             switch self {
@@ -28,23 +37,41 @@ enum HookInstaller {
                 "Could not read \(url.path)."
             case let .settingsNotAnObject(url):
                 "\(url.path) is not a JSON object; refusing to rewrite it."
+            case .noSettingsFile:
+                "No Claude Code configuration directory was found in your home folder."
+            case let .partial(failures):
+                failures
+                    .map { "\(Self.display($0.0)): \($0.1.localizedDescription)" }
+                    .joined(separator: "\n")
             }
+        }
+
+        private static func display(_ url: URL) -> String {
+            (url.path as NSString).abbreviatingWithTildeInPath
         }
     }
 
-    /// Hooks we subscribe to, and whether they are per-tool.
-    static let subscribedEvents: [HookEvent.Kind] = [
-        .sessionStart, .userPromptSubmit, .preToolUse, .postToolUse, .notification, .stop, .sessionEnd,
-    ]
+    static let subscribedEvents = HookSettings.subscribedEvents
 
-    /// Seconds Claude Code waits for the relay before giving up on it. The relay
-    /// budgets less than this for itself; the setting is the outer guarantee that
-    /// a wedged relay cannot hold up a tool.
-    private static let commandTimeout = 5
+    /// One settings file per configuration root the app watches.
+    ///
+    /// Falls back to the default root when none is found, so a first run with no
+    /// Claude Code history still has somewhere to register.
+    static var settingsFiles: [URL] {
+        let roots = ClaudeRoots.all
+        guard !roots.isEmpty else {
+            return [ClaudeRoots.home.appendingPathComponent(".claude/settings.json")]
+        }
+        return roots.map { $0.appendingPathComponent("settings.json") }
+    }
 
-    static var settingsFile: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/settings.json")
+    /// The files as the user would name them, for the confirmation dialog. A
+    /// prompt that says `~/.claude/settings.json` while writing three files is
+    /// not the consent it claims to be.
+    static var settingsFileDescription: String {
+        settingsFiles
+            .map { ($0.path as NSString).abbreviatingWithTildeInPath }
+            .joined(separator: ", ")
     }
 
     /// The command Claude Code will run. Quoted: the bundle lives under a path
@@ -54,84 +81,56 @@ enum HookInstaller {
         return "\"\(executable)\" \(HookRelay.flag)"
     }
 
+    /// True only when every file carries every entry: a root registered while
+    /// another is not is not registered, and the sessions of the unregistered one
+    /// would go on being read from the transcript alone with nothing to say so.
     static var isInstalled: Bool {
-        guard let settings = try? readSettings(),
-              let hooks = settings["hooks"] as? [String: Any] else { return false }
-        return subscribedEvents.contains { event in
-            guard let matchers = hooks[event.rawValue] as? [[String: Any]] else { return false }
-            return matchers.contains { containsOurCommand($0) }
+        let files = settingsFiles
+        guard !files.isEmpty else { return false }
+        return files.allSatisfy { file in
+            guard let settings = try? readSettings(at: file) else { return false }
+            return HookSettings.isInstalled(in: settings)
         }
     }
 
     // MARK: - Mutation
 
     static func install() throws {
-        var settings = try readSettings()
-        var hooks = settings["hooks"] as? [String: Any] ?? [:]
-
-        for event in subscribedEvents {
-            var matchers = (hooks[event.rawValue] as? [[String: Any]]) ?? []
-            // Drop our own entry first so re-installing after a move updates the
-            // path instead of stacking a second relay on every tool call.
-            matchers.removeAll(where: { containsOurCommand($0) })
-            matchers.append(matcherEntry(for: event))
-            hooks[event.rawValue] = matchers
+        try each { file in
+            let settings = try readSettings(at: file)
+            try writeSettings(HookSettings.adding(command: relayCommand, to: settings), to: file)
         }
-
-        settings["hooks"] = hooks
-        try writeSettings(settings)
     }
 
     static func uninstall() throws {
-        var settings = try readSettings()
-        guard var hooks = settings["hooks"] as? [String: Any] else { return }
+        try each { file in
+            let settings = try readSettings(at: file)
+            guard settings["hooks"] != nil else { return }
+            try writeSettings(HookSettings.removing(from: settings), to: file)
+        }
+    }
 
-        for key in hooks.keys {
-            guard var matchers = hooks[key] as? [[String: Any]] else { continue }
-            matchers.removeAll(where: { containsOurCommand($0) })
-            // An event left with no matchers is an empty array we introduced;
-            // remove the key so the file returns to its original shape.
-            if matchers.isEmpty {
-                hooks.removeValue(forKey: key)
-            } else {
-                hooks[key] = matchers
+    /// Apply to every file, and report what failed rather than stopping at the
+    /// first one: a root that cannot be written must not leave the others
+    /// untouched, and the user has to be told which.
+    private static func each(_ body: (URL) throws -> Void) throws {
+        let files = settingsFiles
+        guard !files.isEmpty else { throw InstallError.noSettingsFile }
+
+        var failures: [(URL, Error)] = []
+        for file in files {
+            do {
+                try body(file)
+            } catch {
+                failures.append((file, error))
             }
         }
-
-        if hooks.isEmpty {
-            settings.removeValue(forKey: "hooks")
-        } else {
-            settings["hooks"] = hooks
-        }
-        try writeSettings(settings)
-    }
-
-    // MARK: - Entries
-
-    private static func matcherEntry(for event: HookEvent.Kind) -> [String: Any] {
-        let command: [String: Any] = [
-            "type": "command",
-            "command": relayCommand,
-            "timeout": commandTimeout,
-        ]
-        var entry: [String: Any] = ["hooks": [command]]
-        if event.takesMatcher {
-            entry["matcher"] = "*"
-        }
-        return entry
-    }
-
-    /// Our entries are recognised by the relay flag, which no other tool has a
-    /// reason to pass. That keeps `uninstall` from touching a hook the user wrote.
-    private static func containsOurCommand(_ entry: [String: Any]) -> Bool {
-        guard let commands = entry["hooks"] as? [[String: Any]] else { return false }
-        return commands.contains { ($0["command"] as? String)?.contains(HookRelay.flag) == true }
+        guard failures.isEmpty else { throw InstallError.partial(failures) }
     }
 
     // MARK: - File access
 
-    private static func readSettings() throws -> [String: Any] {
-        let url = settingsFile
+    private static func readSettings(at url: URL) throws -> [String: Any] {
         guard FileManager.default.fileExists(atPath: url.path) else { return [:] }
         guard let data = FileManager.default.contents(atPath: url.path) else {
             throw InstallError.settingsUnreadable(url)
@@ -146,9 +145,8 @@ enum HookInstaller {
         return settings
     }
 
-    private static func writeSettings(_ settings: [String: Any]) throws {
-        let url = settingsFile
-        try backupSettings()
+    private static func writeSettings(_ settings: [String: Any], to url: URL) throws {
+        try backupSettings(at: url)
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -163,8 +161,7 @@ enum HookInstaller {
     /// Re-serialising the file normalises its formatting, so the copy is what the
     /// user falls back to — timestamped, because the pristine original must
     /// survive a second install.
-    private static func backupSettings() throws {
-        let url = settingsFile
+    private static func backupSettings(at url: URL) throws {
         guard FileManager.default.fileExists(atPath: url.path) else { return }
 
         let formatter = DateFormatter()

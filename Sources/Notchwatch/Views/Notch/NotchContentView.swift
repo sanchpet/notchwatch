@@ -1,7 +1,10 @@
+import NotchwatchKit
 import SwiftUI
 
 struct NotchContentView: View {
-    @StateObject private var notchVM = NotchViewModel()
+    /// Handed in rather than created here: the coordinator owns the panel's
+    /// state so that `--panel` can move it whether or not this view exists.
+    @ObservedObject var notchVM: NotchViewModel
     @StateObject private var settings = AppSettings.shared
     @StateObject private var claudeCodeManager = ClaudeCodeManager.shared
     @State private var isHovering = false
@@ -21,7 +24,6 @@ struct NotchContentView: View {
 
     @State private var peekNotice: PeekNotice?
     @State private var permissionToolName: String?
-    @State private var panelControlObserver: NSObjectProtocol?
     @State private var turnDoneProject: String?
     @State private var turnDoneSummary: String?
 
@@ -165,26 +167,15 @@ struct NotchContentView: View {
         .frame(maxWidth: notchVM.windowSize.width, maxHeight: notchVM.windowSize.height, alignment: .top)
         .compositingGroup()
         .preferredColorScheme(.dark)
+        // `--panel` is deliberately not wired up here. The subscription's
+        // lifetime is the process's, not this view's: it is registered in
+        // `main()` and routed by the coordinator, because a view that does not
+        // exist yet (or at all, on a display without a cut-out) cannot answer.
         .onAppear {
             triggerStartupGlow()
-            panelControlObserver = PanelControl.observe { command in
-                switch command {
-                case .open: notchVM.open()
-                case .close: notchVM.close()
-                case .toggle: notchVM.toggle()
-                case .peek: notchVM.peek(duration: settings.noticeDurationSeconds)
-                case .demoOn: claudeCodeManager.enterDemoMode(.busy)
-                case .demoQuiet: claudeCodeManager.enterDemoMode(.quiet)
-                case .demoIdle: claudeCodeManager.enterDemoMode(.idle)
-                case .demoOff: claudeCodeManager.exitDemoMode()
-                }
-            }
         }
         .onDisappear {
             startupGlowTask?.cancel()
-            if let panelControlObserver {
-                DistributedNotificationCenter.default().removeObserver(panelControlObserver)
-            }
         }
     }
 

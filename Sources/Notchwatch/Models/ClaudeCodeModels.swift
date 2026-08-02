@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import NotchwatchKit
 
 // MARK: - Session Discovery
 
@@ -14,8 +15,9 @@ struct ClaudeSession: Identifiable, Codable, Equatable {
     /// Marks a session whose host application is not knowable. A transcript
     /// records no parent process, so nothing connects it to the terminal or
     /// editor it runs in; only an editor lock claims a host, and only when the
-    /// project holds a single session can that claim be trusted.
-    static let unknownHost = "Unknown"
+    /// project holds a single session can that claim be trusted — the rule, and
+    /// this constant, live in `EditorLock`.
+    static let unknownHost = EditorLock.unknownHost
 
     var id: String {
         "\(ideName):\(workspaceFolders.first ?? "\(pid)")"
@@ -27,143 +29,28 @@ struct ClaudeSession: Identifiable, Codable, Equatable {
     let transport: String?
     let runningInWindows: Bool?
 
-    /// Derived from workspace path for project JSONL lookup
-    /// Claude Code uses path with "/" replaced by "-" as the project directory name
+    /// Where this session runs and which of the project's sessions it is. The
+    /// parsing is the kit's — see `WorkspaceRef`.
+    var workspace: WorkspaceRef? {
+        workspaceFolders.first.map { WorkspaceRef($0) }
+    }
+
+    /// Name of the directory holding this project's transcripts.
     var projectKey: String? {
-        guard let workspace = workspaceFolders.first else { return nil }
-        // Strip session fragment if present (e.g., /path#sessionId -> /path)
-        let cleanPath = workspace.components(separatedBy: "#").first ?? workspace
-        // Claude Code escapes the path: "/" -> "-", but keeps leading "-" for absolute paths
-        // e.g., /Users/foo/project -> -Users-foo-project
-        return cleanPath
-            .replacingOccurrences(of: "/", with: "-")
+        workspace?.projectKey
     }
 
     /// Display name for UI (last folder component)
     var displayName: String {
-        guard let workspace = workspaceFolders.first else { return "Unknown" }
-        // Strip session fragment if present (e.g., /path#sessionId -> /path)
-        let cleanPath = workspace.components(separatedBy: "#").first ?? workspace
-        return URL(fileURLWithPath: cleanPath).lastPathComponent
+        guard let name = workspace?.displayName, !name.isEmpty else { return "Unknown" }
+        return name
     }
 
-    /// Terminal session ID extracted from workspace fragment (nil for IDE sessions)
+    /// Transcript id from the workspace fragment (nil for a bare editor lock)
     var terminalSessionId: String? {
-        guard let workspace = workspaceFolders.first else { return nil }
-        let parts = workspace.components(separatedBy: "#")
-        return parts.count > 1 ? parts[1] : nil
+        workspace?.sessionID
     }
 }
-
-// MARK: - Context Window
-
-/// The denominator of the context bar.
-///
-/// The window is a property of the model plus whether Claude Code was launched
-/// with the 1M-context opt-in, and neither fact is written where the obvious
-/// place would be. Measured over 44 local transcripts (26,750 assistant entries
-/// carrying `usage`), `message.model` is one of `claude-opus-4-8`,
-/// `claude-opus-5`, `claude-fable-5` or `<synthetic>` — never once suffixed. The
-/// opt-in survives in two other places, and both have to be brought in by the
-/// caller:
-///
-/// * the model *pin* — `~/.claude/settings.json` → `"model": "opus[1m]"`, an
-///   alias rather than a full id;
-/// * `toolUseResult.resolvedModel` on a `Task` result — present in 9 of the 44
-///   transcripts, and only when a subagent actually ran.
-///
-/// Neither is complete: 8 transcripts with no marker anywhere still reached
-/// prompts of 214k–620k, which a 200k window could not have held. So the last
-/// word belongs to the session itself — a window can never be smaller than a
-/// prompt that demonstrably fit inside it.
-enum ClaudeContextWindow {
-    /// Window of the models that predate the 1M-token context — and of anything
-    /// unrecognised.
-    static let standard = 200_000
-    static let extended = 1_000_000
-
-    /// Windows this app can name, smallest first. Evidence promotes a session to
-    /// the first tier large enough to hold what it has already sent.
-    private static let tiers = [standard, extended]
-
-    /// Whether `modelID` carries Claude Code's 1M-context opt-in suffix.
-    ///
-    /// Applies to the bare aliases a pin uses (`opus[1m]`) as much as to full ids,
-    /// so it deliberately tests only the suffix.
-    static func declaresLongWindow(_ modelID: String) -> Bool {
-        modelID.lowercased().hasSuffix("[1m]")
-    }
-
-    /// Window the model id implies on its own.
-    ///
-    /// A bare id always means the standard window, however recent the model. The
-    /// 1M context is an opt-in a session either took or did not — it is not a
-    /// property of the model, even where the API offers one. Deriving it from the
-    /// id instead would hand 1M to every modern model, leave `longWindowOptIn`
-    /// and the evidence floor with nothing to decide, and show a full 200k window
-    /// as 19%.
-    static func forModel(_ model: String) -> Int {
-        declaresLongWindow(model) ? extended : standard
-    }
-
-    /// Window to measure against, from the model, any opt-in seen for the
-    /// session, and the largest prompt the session has actually sent.
-    ///
-    /// The evidence floor is what keeps a misread model from pinning the bar at
-    /// 100%: a session that has already sent 620k tokens is not running a 200k
-    /// window, whatever the id says.
-    static func resolve(model: String, longWindowOptIn: Bool, observedPromptTokens: Int) -> Int {
-        let declared = longWindowOptIn ? extended : forModel(model)
-        guard observedPromptTokens > declared else { return declared }
-        return tiers.first { $0 >= observedPromptTokens } ?? observedPromptTokens
-    }
-}
-
-// MARK: - Token Usage
-
-/// Token usage from the `message.usage` object of a transcript entry.
-///
-/// Every field describes one API request, not a running session total — the API
-/// reports usage per request and Claude Code records each one verbatim.
-struct ClaudeTokenUsage: Equatable {
-    var inputTokens: Int = 0
-    var outputTokens: Int = 0
-    var cacheReadInputTokens: Int = 0
-    var cacheCreationInputTokens: Int = 0
-
-    /// How much of the context window the last request actually occupied.
-    ///
-    /// The three input fields partition one prompt: `cache_read` is the prefix
-    /// served from cache, `cache_creation` the part written to cache on this
-    /// request, `input` the remainder billed at full price. Only their sum is the
-    /// prompt — and only the sum grows monotonically across a session. When a
-    /// cache entry expires, a large prefix moves from `cache_read` to
-    /// `cache_creation` in a single step, so any subset of the three collapses at
-    /// a moment when the real context did not move at all.
-    ///
-    /// `output` is deliberately excluded: it is not in the window during the
-    /// request that produced it, and the next request folds it into that
-    /// request's prefix, so counting it here counts it twice.
-    var promptTokens: Int {
-        inputTokens + cacheReadInputTokens + cacheCreationInputTokens
-    }
-
-    /// Share of `window` the prompt occupies, clamped to 0…1.
-    func contextFraction(window: Int) -> Double {
-        guard window > 0 else { return 0 }
-        return min(1.0, Double(promptTokens) / Double(window))
-    }
-}
-
-// A price readout used to live here: it multiplied the *last* request's four
-// token counts by an opus-or-sonnet guess and was labelled the session's cost.
-// Both halves were wrong — the price of one request is not the price of a
-// session, and `model.contains("opus")` silently charged `claude-fable-5`
-// (present in the reference corpus) at Sonnet rates. An honest figure has to
-// accumulate over every request of the session, which this app cannot do: it
-// attaches to a transcript at a 2 MB tail (`TranscriptTail.historyWindowBytes`)
-// and never sees what came before. Rather than keep a number that reads like a
-// bill and is not one, there is none.
 
 // MARK: - Tool Execution
 

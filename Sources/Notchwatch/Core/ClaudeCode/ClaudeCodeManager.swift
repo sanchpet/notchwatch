@@ -235,46 +235,11 @@ final class ClaudeCodeManager: ObservableObject {
 
     // MARK: - Private Properties
 
-    /// Home directory, read from the password database rather than `NSHomeDirectory`
-    /// so that a future sandboxed build still finds the real one.
-    private static let homeDir: URL = {
-        if let pw = getpwuid(getuid()), let home = pw.pointee.pw_dir {
-            return URL(fileURLWithPath: String(cString: home))
-        }
-        return FileManager.default.homeDirectoryForCurrentUser
-    }()
-
-    /// Every Claude Code configuration root on this machine, not just `~/.claude`.
-    ///
-    /// `CLAUDE_CONFIG_DIR` relocates the whole configuration directory, and running
-    /// separate accounts out of `~/.claude-personal` and `~/.claude-work` is the
-    /// documented way to keep them apart. A watcher that reads only `~/.claude`
-    /// therefore misses every session of anyone who uses that mechanism — and
-    /// silently, since the default root still exists and still holds whatever
-    /// stale transcripts were written before the split.
-    ///
-    /// The app is launched from Finder and inherits no shell environment, so the
-    /// variable itself is not available to read: the roots are discovered instead,
-    /// by looking for the `projects` directory that makes a root a root.
-    private let claudeRoots: [URL] = {
-        let fm = FileManager.default
-        // Deliberately without `.skipsHiddenFiles`: every root is a dot-directory,
-        // so that option would hide exactly what is being looked for.
-        let candidates = (try? fm.contentsOfDirectory(
-            at: homeDir,
-            includingPropertiesForKeys: nil,
-            options: [.skipsSubdirectoryDescendants]
-        )) ?? []
-
-        let roots = ([homeDir.appendingPathComponent(".claude")] + candidates.sorted { $0.path < $1.path })
-            .filter { $0.lastPathComponent == ".claude" || $0.lastPathComponent.hasPrefix(".claude-") }
-            .filter { fm.fileExists(atPath: $0.appendingPathComponent("projects").path) }
-
-        // The seed above keeps the default root first when it exists; the dedup
-        // drops the copy the directory listing then yields.
-        var seen = Set<String>()
-        return roots.filter { seen.insert($0.standardizedFileURL.path).inserted }
-    }()
+    /// Every Claude Code configuration root on this machine, not just `~/.claude`
+    /// — see `ClaudeRoots`, which the hook installer reads too so that the roots
+    /// watched and the roots written to cannot drift apart. Read once: a root
+    /// appearing mid-session brings no sessions with it.
+    private let claudeRoots: [URL] = ClaudeRoots.all
 
     /// The configuration root a session's transcript lives under — `~/.claude`,
     /// `~/.claude-personal`, whichever. A transcript sits at
@@ -316,28 +281,9 @@ final class ClaudeCodeManager: ObservableObject {
 
     private var sessionScanTimer: Timer?
 
-    /// Sessions whose replayed history must not raise permission prompts.
-    private var loadingHistory: Set<String> = []
-
-    /// Tool ids awaiting completion, per session, with the time they started.
-    private var pendingToolChecks: [String: [String: Date]] = [:]
-
     /// Context reading per session. Owns every decision about which usage entry
     /// counts; `ClaudeCodeState` only carries the result to the views.
     private var contextTrackers: [String: ClaudeContextTracker] = [:]
-
-    /// Timer to detect when a tool is waiting for permission (no result after delay)
-    private var permissionCheckTimer: Timer?
-    /// Delay before assuming a tool needs permission (seconds)
-    private let permissionCheckDelay: TimeInterval = 5.0
-    /// Tools that typically require user permission or interaction
-    private let permissionEligibleTools: Set<String> = [
-        "Bash", "Write", "Edit", "Task", "NotebookEdit", // File/system operations
-        "AskUserQuestion", // User interaction
-        "WebSearch", "WebFetch", // Web operations (may need approval)
-    ]
-    /// Tools that are always auto-approved (never show permission indicator)
-    private let autoApprovedTools: Set<String> = ["Read", "Glob", "Grep", "LS", "TodoWrite"]
 
     /// Timer to detect idle state (for thinking)
     private var idleCheckTimer: Timer?
@@ -384,8 +330,10 @@ final class ClaudeCodeManager: ObservableObject {
         idleCheckTimer = nil
         toolIdleTimer?.invalidate()
         toolIdleTimer = nil
-        permissionCheckTimer?.invalidate()
-        permissionCheckTimer = nil
+        // The spool is a clock like any other: a hook firing in another terminal
+        // while the fixture is on screen would rewrite it between the command and
+        // the screenshot.
+        HookSpoolWatcher.shared.stop()
 
         for key in Array(watched.keys) {
             detach(sessionKey: key)
@@ -411,6 +359,7 @@ final class ClaudeCodeManager: ObservableObject {
 
         scanForSessions()
         startSessionScanning()
+        updateHookBridge()
         objectWillChange.send()
     }
 
@@ -500,16 +449,16 @@ final class ClaudeCodeManager: ObservableObject {
                     let modDate = (try? fm.attributesOfItem(atPath: jsonlFile.path))?[.modificationDate] as? Date
                     guard (modDate ?? .distantPast) > recentThreshold else { continue }
 
-                    // The project directory name is the workspace path with "/"
-                    // replaced by "-", which is not reversible for a path that
-                    // contains a dash. Good enough to key a session on; the real
-                    // directory comes from the transcript in `workingDirectory`.
-                    let workspacePath = projectDir.lastPathComponent.replacingOccurrences(of: "-", with: "/")
+                    // Decoding the directory name is a guess — the escaping is not
+                    // reversible — but it is good enough to key a session on, and
+                    // it round-trips back to this same directory. The real working
+                    // directory arrives later, in the transcript's `cwd`.
+                    let workspacePath = ProjectKey.decode(projectDir.lastPathComponent)
                     let sessionId = jsonlFile.deletingPathExtension().lastPathComponent
 
                     sessions.append(ClaudeSession(
                         pid: 0, // Terminal sessions don't have a single PID
-                        workspaceFolders: ["\(workspacePath)#\(sessionId)"],
+                        workspaceFolders: [WorkspaceRef(path: workspacePath, sessionID: sessionId).raw],
                         ideName: "Terminal",
                         transport: nil,
                         runningInWindows: nil
@@ -556,51 +505,36 @@ final class ClaudeCodeManager: ObservableObject {
 
     /// One session per live transcript of the locked project.
     ///
-    /// An editor lock names a *project*, not a session — it carries a workspace
-    /// path and the editor's pid, and nothing that distinguishes one Claude Code
-    /// session in that project from another. Resolving it to a single transcript
-    /// therefore picked whichever file was touched last and made every other
-    /// session of that project invisible: not watched, not counted, not eligible
-    /// to be focused. Sessions are keyed by workspace path plus transcript id,
-    /// the same shape the terminal scan already builds, so each gets its own row
-    /// while `pid` and `ideName` stay attached and the editor is still reachable
-    /// from any of them.
-    ///
-    /// A lock whose project has no recent transcript expands to nothing: an
-    /// editor left open on a project is not a session, and answering with the
-    /// newest stale file is the defect this replaces.
+    /// Which sessions a lock stands for, and whether its editor may be named as
+    /// their host, is `EditorLock.expand`; this only finds the live transcripts
+    /// to feed it, and dresses the result back up as `ClaudeSession`.
     private func expand(lock session: ClaudeSession) -> [ClaudeSession] {
+        guard let workspace = session.workspaceFolders.first else { return [session] }
         // The editor being alive is evidence that the project is in use, so this
         // window is wider than the terminal scan's — that one has only a file
         // modification time to go on.
         let cutoff = Date().addingTimeInterval(-1800)
-        guard let workspace = session.workspaceFolders.first,
-              !workspace.contains("#") else { return [session] }
 
-        var live: [URL] = []
+        var liveSessionIDs: [String] = []
         for projectsDir in projectsDirs {
-            let dir = projectsDir.appendingPathComponent(
-                workspace.replacingOccurrences(of: "/", with: "-")
-            )
+            let dir = projectsDir.appendingPathComponent(WorkspaceRef(workspace).projectKey)
             for transcript in findActiveSessionFiles(in: dir) {
                 let modified = (try? transcript.resourceValues(forKeys: [.contentModificationDateKey]))?
                     .contentModificationDate ?? .distantPast
                 guard modified > cutoff else { continue }
-                live.append(transcript)
+                liveSessionIDs.append(transcript.deletingPathExtension().lastPathComponent)
             }
         }
 
-        // Only when the project has exactly one live transcript can the lock's
-        // editor be attributed to it. With several, the lock says which editor
-        // is open, not which of them hosts which session — most are running in
-        // a terminal — so claiming its identity for all of them makes "go to
-        // this session" open the wrong application, confidently.
-        let host = live.count == 1 ? session.ideName : ClaudeSession.unknownHost
-        return live.map { transcript in
+        return EditorLock.expand(
+            workspace: workspace,
+            ideName: session.ideName,
+            liveSessionIDs: liveSessionIDs
+        ).map {
             ClaudeSession(
                 pid: session.pid,
-                workspaceFolders: ["\(workspace)#\(transcript.deletingPathExtension().lastPathComponent)"],
-                ideName: host,
+                workspaceFolders: [$0.workspace],
+                ideName: $0.host,
                 transport: session.transport,
                 runningInWindows: session.runningInWindows
             )
@@ -683,18 +617,16 @@ final class ClaudeCodeManager: ObservableObject {
             }
         }
 
-        // Fallback: the "/" -> "-" project key is lossy, so compare directories
-        // by the path they decode to rather than by the key we built.
-        guard let workspace = session.workspaceFolders.first,
+        // Fallback: the direct lookup is an exact path, and the filesystem it
+        // asks is case-insensitive while a truncated key is not an exact name at
+        // all. Comparing every directory through `ProjectKey.matches` covers both.
+        guard let workspace = session.workspace,
               let projectDirs = try? fm.contentsOfDirectory(at: projectsDir, includingPropertiesForKeys: nil) else {
             return nil
         }
-        let cleanWorkspace = (workspace.components(separatedBy: "#").first ?? workspace).lowercased()
 
         for dir in projectDirs {
-            let decoded = dir.lastPathComponent.replacingOccurrences(of: "-", with: "/")
-            let normalized = decoded.hasPrefix("/") ? decoded : "/" + decoded
-            guard normalized.lowercased() == cleanWorkspace else { continue }
+            guard ProjectKey.matches(directoryName: dir.lastPathComponent, workspacePath: workspace.path) else { continue }
 
             if let terminalId = session.terminalSessionId {
                 let file = dir.appendingPathComponent("\(terminalId).jsonl")
@@ -758,9 +690,8 @@ final class ClaudeCodeManager: ObservableObject {
 
         // Last resort, and a poor one: the workspace path rebuilt from the
         // project directory name, which cannot survive a path containing a dash.
-        if sessionStates[session.id]?.cwd.isEmpty == true,
-           let workspace = session.workspaceFolders.first {
-            sessionStates[session.id]?.cwd = workspace.components(separatedBy: "#").first ?? workspace
+        if sessionStates[session.id]?.cwd.isEmpty == true, let workspace = session.workspace {
+            sessionStates[session.id]?.cwd = workspace.path
         }
 
         refreshGitBranch(for: session.id)
@@ -772,20 +703,16 @@ final class ClaudeCodeManager: ObservableObject {
         try? watched[sessionKey]?.handle.close()
         watched.removeValue(forKey: sessionKey)
         sessionStates.removeValue(forKey: sessionKey)
-        pendingToolChecks.removeValue(forKey: sessionKey)
         contextTrackers.removeValue(forKey: sessionKey)
-        loadingHistory.remove(sessionKey)
         sessionsNeedingPermission.removeAll { $0.id == sessionKey }
     }
 
     private func loadHistory(for sessionKey: String) {
         guard let entry = watched[sessionKey] else { return }
 
-        loadingHistory.insert(sessionKey)
         for line in TranscriptTail.history(of: entry.transcript, maxLines: Self.historyLines) {
             parseTranscriptLine(line, sessionKey: sessionKey)
         }
-        loadingHistory.remove(sessionKey)
 
         // History is what already happened: nothing replayed from it is running.
         if var sessionState = sessionStates[sessionKey] {
@@ -793,7 +720,6 @@ final class ClaudeCodeManager: ObservableObject {
             sessionState.isThinking = false
             sessionStates[sessionKey] = sessionState
         }
-        pendingToolChecks[sessionKey] = nil
     }
 
     private func readNewData(for sessionKey: String) {
@@ -998,7 +924,8 @@ final class ClaudeCodeManager: ObservableObject {
                     sessionState.isThinking = false
                     sessionState.lastStopReason = "interrupted"
                     sessionState.activeTools.removeAll()
-                    pendingToolChecks[sessionKey] = nil
+                    sessionState.needsPermission = false
+                    sessionState.pendingPermissionTool = nil
                 }
 
             case "tool_use":
@@ -1035,7 +962,6 @@ final class ClaudeCodeManager: ObservableObject {
         sessionState.lastStopReason = "interrupted"
         sessionState.activeTools.removeAll()
         sessionStates[sessionKey] = sessionState
-        pendingToolChecks[sessionKey] = nil
         updateSessionsNeedingPermission()
     }
 
@@ -1176,7 +1102,6 @@ final class ClaudeCodeManager: ObservableObject {
             sessionState.isThinking = false
             sessionState.lastStopReason = "end_turn"
             sessionState.activeTools.removeAll()
-            pendingToolChecks[sessionKey] = nil
 
         case .sessionEnd:
             hookSessions.removeValue(forKey: sessionKey)
@@ -1218,7 +1143,7 @@ final class ClaudeCodeManager: ObservableObject {
         let cwd = event.cwd ?? transcript.deletingLastPathComponent().path
         let session = ClaudeSession(
             pid: 0,
-            workspaceFolders: ["\(cwd)#\(event.sessionID)"],
+            workspaceFolders: [WorkspaceRef(path: cwd, sessionID: event.sessionID).raw],
             ideName: "Terminal",
             transport: nil,
             runningInWindows: nil
@@ -1243,70 +1168,18 @@ final class ClaudeCodeManager: ObservableObject {
         sessionStates[sessionKey] = sessionState
     }
 
-    // MARK: - Permission Detection
-
-    /// Check if a tool should be tracked for permission
-    private func isPermissionEligible(_ toolName: String) -> Bool {
-        if autoApprovedTools.contains(toolName) {
-            return false
-        }
-        if permissionEligibleTools.contains(toolName) {
-            return true
-        }
-        // MCP tools (external servers) may need permission
-        if toolName.hasPrefix("mcp__") {
-            return true
-        }
-        return false
-    }
-
-    /// A blocked tool is reported by the `Notification` hook and by nothing else.
+    /// A tool finishing means whatever it was blocked on has been answered.
     ///
-    /// This used to be inferred from elapsed time: a tool still running after
-    /// five seconds was declared to be awaiting permission. That is a guess
-    /// presented as a fact, and it is wrong in the ordinary case — a test run, a
-    /// release build and a large grep all outlive the threshold while nobody is
-    /// being asked anything, and in bypass mode nothing is ever asked at all.
-    /// A permission indicator that fires on every slow command is one the user
-    /// learns to ignore, which costs more than having none.
-    ///
-    /// So there is no inference here any more. With hooks registered the signal
-    /// is exact; without them the app says nothing about permissions, which is
-    /// the honest thing for it to say.
-    private func clearPermissionCheck(sessionKey: String, toolId: String, in sessionState: inout ClaudeCodeState) {
-        pendingToolChecks[sessionKey]?.removeValue(forKey: toolId)
-
-        if sessionState.needsPermission, pendingToolChecks[sessionKey]?.isEmpty ?? true {
-            sessionState.needsPermission = false
-            sessionState.pendingPermissionTool = nil
-        }
-    }
-
-    private func checkPendingPermissions() {
-        let now = Date()
-        var changed = false
-
-        for (sessionKey, toolChecks) in pendingToolChecks {
-            guard var sessionState = sessionStates[sessionKey] else { continue }
-            for (toolId, startTime) in toolChecks where now.timeIntervalSince(startTime) >= permissionCheckDelay {
-                guard let tool = sessionState.activeTools.first(where: { $0.id == toolId }) else { continue }
-                sessionState.needsPermission = true
-                sessionState.pendingPermissionTool = tool.toolName
-                sessionStates[sessionKey] = sessionState
-                changed = true
-                break
-            }
-        }
-
-        if changed {
-            objectWillChange.send()
-        }
-        updateSessionsNeedingPermission()
-
-        if !pendingToolChecks.values.contains(where: { !$0.isEmpty }) {
-            permissionCheckTimer?.invalidate()
-            permissionCheckTimer = nil
-        }
+    /// There is no ledger of pending tools any more. The flag has exactly one
+    /// setter — the `Notification` hook — so clearing it needs no bookkeeping:
+    /// a tool that has returned is not waiting on anybody. The inference this
+    /// replaced declared a permission request for any tool still running after
+    /// five seconds, which fired on every test run and taught the user to
+    /// ignore the indicator.
+    private func clearPermissionCheck(sessionKey _: String, toolId _: String, in sessionState: inout ClaudeCodeState) {
+        guard sessionState.needsPermission else { return }
+        sessionState.needsPermission = false
+        sessionState.pendingPermissionTool = nil
     }
 
     private func updateSessionsNeedingPermission() {
@@ -1357,7 +1230,6 @@ final class ClaudeCodeManager: ObservableObject {
             sessionStates[sessionKey] = updated
         }
 
-        pendingToolChecks.removeAll()
         updateSessionsNeedingPermission()
     }
 

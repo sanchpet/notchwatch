@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import NotchwatchKit
 
 /// Watches the spool directory and hands each event to the app, then deletes it.
 @MainActor
@@ -32,7 +33,9 @@ final class HookSpoolWatcher {
             return
         }
 
-        discardStaleEvents()
+        // Events written while nothing was draining describe sessions that have
+        // moved on; replaying them would show tools that finished long ago.
+        HookSpool.discardStale()
 
         let descriptor = open(HookSpool.directory.path, O_EVTONLY)
         guard descriptor >= 0 else {
@@ -84,7 +87,11 @@ final class HookSpoolWatcher {
         ) else { return }
 
         // Names are timestamp-prefixed, so lexical order is arrival order.
-        for file in files.filter({ $0.pathExtension == "json" }).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+        let events = files
+            .filter { HookSpoolName.isEvent($0.lastPathComponent) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        for file in events {
             let data = fileManager.contents(atPath: file.path)
             // Removed before dispatch: an event that cannot be decoded is still
             // consumed, so one malformed payload cannot wedge the spool.
@@ -95,24 +102,6 @@ final class HookSpoolWatcher {
                 continue
             }
             handler(event)
-        }
-    }
-
-    /// Events written while the app was not running describe sessions that have
-    /// moved on; replaying them would show tools that finished long ago.
-    private func discardStaleEvents() {
-        let fileManager = FileManager.default
-        guard let files = try? fileManager.contentsOfDirectory(
-            at: HookSpool.directory,
-            includingPropertiesForKeys: [.contentModificationDateKey]
-        ) else { return }
-
-        let cutoff = Date().addingTimeInterval(-HookSpool.maxEventAge)
-        for file in files {
-            let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-            if (modified ?? .distantPast) < cutoff {
-                try? fileManager.removeItem(at: file)
-            }
         }
     }
 }

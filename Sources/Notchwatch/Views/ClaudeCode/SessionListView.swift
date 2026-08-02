@@ -5,6 +5,7 @@
 //  One row per live session, for the expanded panel.
 //
 
+import NotchwatchKit
 import SwiftUI
 
 /// Every watched session, one row each.
@@ -30,14 +31,10 @@ struct SessionListView: View {
                 manager.sessionStates[session.id].map { (session, $0) }
             }
             .sorted { lhs, rhs in
-                // Whatever is asking for the user comes first — that is the
-                // question the list is opened to answer. Recency only orders
-                // sessions of equal standing.
-                let left = Standing(lhs.1), right = Standing(rhs.1)
-                if left.rank != right.rank {
-                    return left.rank < right.rank
-                }
-                return (lhs.1.lastUpdateTime ?? .distantPast) > (rhs.1.lastUpdateTime ?? .distantPast)
+                SessionStanding.precedes(
+                    (SessionStanding(lhs.1), lhs.1.lastUpdateTime),
+                    (SessionStanding(rhs.1), rhs.1.lastUpdateTime)
+                )
             }
 
             ForEach(rows, id: \.0.id) { session, state in
@@ -104,8 +101,8 @@ private struct SessionRow: View {
         return .green
     }
 
-    private var standing: Standing {
-        Standing(state)
+    private var standing: SessionStanding {
+        SessionStanding(state)
     }
 
     var body: some View {
@@ -185,24 +182,20 @@ func formatTokens(_ count: Int) -> String {
     return "\(count)"
 }
 
-/// What the row is telling the reader.
-///
-/// Four states, and the two that want the user were previously
-/// indistinguishable from the two that do not: a session awaiting a reply
-/// shared the idle grey, and one awaiting permission was within a shade of
-/// the working orange. Reading the list to find "which of these is calling
-/// me" was therefore guesswork — which is the only question the list is
-/// opened to answer when the notch has gone green.
-///
-/// This is deliberately the plain fact, not the notch's notification: the
-/// border clears once the user looks, because it is an alarm. A session that
-/// is waiting is still waiting after it has been seen, so the row keeps
-/// saying so until it is answered.
-private enum Standing {
-    case needsPermission
-    case awaitingReply
-    case working
-    case idle
+/// The row's standing, in the panel's palette. What the standing *is* — and
+/// which of two rows is listed first — is `NotchwatchKit.SessionStanding`; only
+/// the hue is decided here, because a `Color` would drag SwiftUI into the kit.
+private extension SessionStanding {
+    /// Which three facts of a session state the standing is read from. The
+    /// reading itself, priority included, belongs to the kit: this hands over
+    /// the facts and takes back the verdict.
+    init(_ state: ClaudeCodeState) {
+        self.init(
+            needsPermission: state.needsPermission,
+            isAwaitingReply: state.isSessionComplete,
+            isActive: state.isActive
+        )
+    }
 
     var color: Color {
         switch self {
@@ -210,39 +203,6 @@ private enum Standing {
         case .awaitingReply: Color(red: 0.3, green: 0.85, blue: 0.55)
         case .working: Color(red: 0.9, green: 0.4, blue: 0.1)
         case .idle: Color.white.opacity(0.25)
-        }
-    }
-
-    /// Spelled out for the two that are asking for something. Colour alone
-    /// is a poor carrier — four hues in a small row are hard to hold apart,
-    /// and impossible for a reader who does not separate red from green.
-    var label: String? {
-        switch self {
-        case .needsPermission: "needs you"
-        case .awaitingReply: "your turn"
-        case .working, .idle: nil
-        }
-    }
-
-    /// Rows sort by this: the ones asking for something first.
-    var rank: Int {
-        switch self {
-        case .needsPermission: 0
-        case .awaitingReply: 1
-        case .working: 2
-        case .idle: 3
-        }
-    }
-
-    init(_ state: ClaudeCodeState) {
-        if state.needsPermission {
-            self = .needsPermission
-        } else if state.isSessionComplete {
-            self = .awaitingReply
-        } else if state.isActive {
-            self = .working
-        } else {
-            self = .idle
         }
     }
 }
