@@ -1,5 +1,7 @@
 # Notchwatch
 
+> **Retired and archived, 30 August 2026.** Four weeks of daily use settled the question the unsigned MVP existed to answer: an indicator that is always in view spends more attention than it saves, because it draws the eye whether or not the state has changed. That is a verdict on ambient presence, not on the code — v0.1.0 builds and runs, and the DMG on the Releases page still installs. Signing was deferred until the tool earned it; it did not, so it was never bought. Fork it if the trade-off comes out differently for you.
+
 Claude Code session state in the notch of your Mac.
 
 Notchwatch is a menu-bar/notch companion for [Claude Code](https://claude.com/claude-code). It sits in the notch (or the menu bar on Macs without one) and shows what the agent is doing right now: the tool it is running, whether it is thinking, whether it is waiting for a permission decision, the current todo list, elapsed time, git branch, token usage and how much of the context window is left.
